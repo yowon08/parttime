@@ -229,6 +229,7 @@ function App() {
   const [cameraStress, setCameraStress] = useState(0);
   const [ambushPending, setAmbushPending] = useState(false);
   const [anomalyEscalated, setAnomalyEscalated] = useState(false);
+  const [rebootSuppressed, setRebootSuppressed] = useState(false);
   const [escalationFrameIndex, setEscalationFrameIndex] = useState(null);
 
   const overlayTimer = useRef(null);
@@ -373,14 +374,26 @@ function App() {
   }, [gameStarted, anomalyAge, anomalyCam, overlay, dead, cleared, showCctvHud, rebootRequired, signalFailure]);
 
   useEffect(() => {
-    if (!gameStarted || dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (
+      !gameStarted ||
+      dead ||
+      cleared ||
+      rebootRequired ||
+      signalFailure ||
+      rebootSuppressed ||
+      ambushPending ||
+      anomalyCam !== null ||
+      overlay ||
+      monitorMotion ||
+      !cctvOpen
+    ) return undefined;
     const timer = setInterval(() => {
       const failureChance = Math.min(0.82, 0.2 + cameraStress * 0.09);
       if (Math.random() < failureChance) triggerRebootFailure();
       setCameraStress((stress) => Math.max(0, stress - 1));
     }, 10000);
     return () => clearInterval(timer);
-  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen, cameraStress]);
+  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, rebootSuppressed, ambushPending, anomalyCam, overlay, monitorMotion, cctvOpen, cameraStress]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -476,6 +489,20 @@ function App() {
 
     return () => clearTimeout(lingerTimer.current);
   }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
+
+  useEffect(() => {
+    if (!showCctvHud || dead || cleared || rebootRequired || signalFailure || overlay || anomalyCam !== null) {
+      setRebootSuppressed(false);
+      return undefined;
+    }
+
+    setRebootSuppressed(true);
+    const timer = setTimeout(() => {
+      setRebootSuppressed(false);
+    }, LINGER_AMBUSH_DELAY + 500);
+
+    return () => clearTimeout(timer);
+  }, [showCctvHud, camIndex, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
 
   useEffect(() => {
     clearTimeout(escalationTimer.current);
