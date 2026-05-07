@@ -51,18 +51,37 @@ button {
 }
 
 .signal-failing .camera-image {
-  filter: grayscale(0.9) contrast(1.75) brightness(0.55) saturate(0.4);
-  animation: signal-collapse 0.16s infinite steps(2);
+  filter: grayscale(1) contrast(0.55) brightness(0.12) saturate(0);
+  opacity: 0.16;
 }
 
 .signal-failing .cam-label,
 .signal-failing .hud-clock {
   opacity: 0.48;
-  animation: jitter 0.12s infinite steps(2);
 }
 
 .signal-failing::before {
-  opacity: 0.48;
+  opacity: 0.72;
+}
+
+.signal-failing .static-burst {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.22) 0 1px,
+      rgba(0, 0, 0, 0.78) 1px 4px,
+      rgba(255, 255, 255, 0.12) 4px 5px,
+      transparent 5px 8px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.12) 0 2px,
+      rgba(0, 0, 0, 0.52) 2px 9px
+    ),
+    rgba(0, 0, 0, 0.82);
+  mix-blend-mode: normal;
+  opacity: 0.98;
+  animation: signal-noise-only 0.11s infinite steps(2);
 }
 
 .signal-warning {
@@ -850,6 +869,28 @@ button {
   100% {
     transform: translate(0, 0) scale(1);
     clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes signal-noise-only {
+  0% {
+    filter: contrast(1.6) brightness(0.85);
+    opacity: 0.94;
+  }
+
+  35% {
+    filter: contrast(2.2) brightness(1.1);
+    opacity: 1;
+  }
+
+  70% {
+    filter: contrast(1.85) brightness(0.75);
+    opacity: 0.97;
+  }
+
+  100% {
+    filter: contrast(1.6) brightness(0.85);
+    opacity: 0.94;
   }
 }
 

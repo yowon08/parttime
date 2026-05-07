@@ -12,83 +12,52 @@ const BGM_VOLUME = 0.28;
 const VHS_VOLUME = 0.24;
 const CLEAR_TIME_SECONDS = 240;
 
+const CAMERA_FILE_COUNTS = {
+  A: 4,
+  B: 2,
+  C: 3,
+  D: 2,
+  E: 3,
+  F: 3,
+  G: 2,
+  H: 2,
+  I: 4,
+  J: 3,
+  L: 3,
+};
+
+const CAMERA_NAMES = {
+  A: "격리 복도",
+  B: "자료 보관 통로",
+  C: "청색 복도",
+  D: "지하 하역장",
+  E: "균열 복도",
+  F: "처치 준비실",
+  G: "관제실 외곽",
+  H: "폐쇄 격납실",
+  I: "비상 계단",
+  J: "격리 병동",
+  L: "보조 구역",
+};
+
+function makeCamera(letter, index) {
+  return {
+    id: `CAM ${String(index).padStart(2, "0")}`,
+    name: CAMERA_NAMES[letter] ?? `구역 ${letter}`,
+    image: `/cameras/Cameras/${letter}-1.png`,
+    normal: `${letter} 구역 정상 화면.`,
+    anomalies: Array.from({ length: CAMERA_FILE_COUNTS[letter] - 1 }, (_, anomalyIndex) => {
+      const frame = anomalyIndex + 2;
+      return {
+        image: `/cameras/Cameras/${letter}-${frame}.png`,
+        text: `${letter} 구역 이상현상 ${frame}.`,
+      };
+    }),
+  };
+}
+
 const CAMERAS = [
-  {
-    id: "CAM 01",
-    name: "격리 복도",
-    image: "/cameras/Cameras/A-1.png",
-    normal: "복도 끝 격리문 앞은 비어 있다.",
-    anomalies: [{ image: "/cameras/Cameras/A-3.png", text: "문 오른쪽 벽 뒤에서 마른 형체가 이쪽을 보고 있다." }],
-  },
-  {
-    id: "CAM 02",
-    name: "자료 보관 통로",
-    image: "/cameras/Cameras/B-1.png",
-    normal: "파일 선반 사이 통로에 희미한 작업등이 켜져 있다.",
-    anomalies: [{ image: "/cameras/Cameras/B-2.png", text: "통로 깊은 곳의 물체 배치가 이전과 다르다." }],
-  },
-  {
-    id: "CAM 03",
-    name: "청색 복도",
-    image: "/cameras/Cameras/C-1.png",
-    normal: "푸른빛 복도 끝의 문이 닫혀 있다.",
-    anomalies: [{ image: "/cameras/Cameras/C-2.png", text: "문 아래쪽에 사람 머리 같은 것이 놓여 있다." }],
-  },
-  {
-    id: "CAM 04",
-    name: "지하 하역장",
-    image: "/cameras/Cameras/D-1.png",
-    normal: "지하 하역장 바닥에 오래된 장비들이 방치되어 있다.",
-    anomalies: [{ image: "/cameras/Cameras/D-2.png", text: "긴 팔다리를 가진 개체가 하역장 중앙에 엎드려 있다." }],
-  },
-  {
-    id: "CAM 05",
-    name: "균열 복도",
-    image: "/cameras/Cameras/E-1.png",
-    normal: "벽면이 갈라진 복도에 찢어진 차단막이 걸려 있다.",
-    anomalies: [
-      { image: "/cameras/Cameras/E-2.png", text: "복도 끝 문 안쪽에서 사람의 얼굴이 드러나 있다." },
-      { image: "/cameras/Cameras/E-3.png", text: "카메라 바로 앞에 검은 머리의 얼굴이 붙어 있다." },
-    ],
-  },
-  {
-    id: "CAM 06",
-    name: "처치 준비실",
-    image: "/cameras/Cameras/F-1.png",
-    normal: "처치대와 이동식 카트가 어두운 복도 옆에 정리되어 있다.",
-    anomalies: [
-      { image: "/cameras/Cameras/F-2.png", text: "처치대 아래쪽에서 얼굴 일부가 드러나 있다." },
-      { image: "/cameras/Cameras/F-3.png", text: "흰 가운을 입은 인물이 복도 중앙에 서 있다." },
-    ],
-  },
-  {
-    id: "CAM 07",
-    name: "관제실 외곽",
-    image: "/cameras/Cameras/G-1.png",
-    normal: "꺼진 모니터와 책상이 어둠 속에 잠겨 있다.",
-    anomalies: [{ image: "/cameras/Cameras/G-2.png", text: "책상 위 모니터들이 푸른빛으로 켜져 있다." }],
-  },
-  {
-    id: "CAM 08",
-    name: "폐쇄 격납실",
-    image: "/cameras/Cameras/H-1.png",
-    normal: "격납실 안쪽 벽면에 희미한 얼룩이 남아 있다.",
-    anomalies: [{ image: "/cameras/Cameras/H-2.png", text: "거대한 얼굴이 카메라 가까이에서 화면을 가로막고 있다." }],
-  },
-  {
-    id: "CAM 09",
-    name: "비상 계단",
-    image: "/cameras/Cameras/I-1.png",
-    normal: "녹슨 비상 계단 위로 약한 빛이 새어 들어온다.",
-    anomalies: [{ image: "/cameras/Cameras/I-2.png", text: "계단 아래에서 기어 올라오는 개체가 보인다." }],
-  },
-  {
-    id: "CAM 10",
-    name: "격리 병동",
-    image: "/cameras/Cameras/J-1.png",
-    normal: "낡은 병동 복도에 휠체어와 의료 장비가 놓여 있다.",
-    anomalies: [{ image: "/cameras/Cameras/J-2.png", text: "병동 안쪽에 있어서는 안 될 형체가 나타나 있다." }],
-  },
+  ...["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"].map((letter, index) => makeCamera(letter, index + 1)),
   {
     id: "CAM 11",
     name: "폐쇄 채널",
@@ -103,6 +72,7 @@ const CAMERAS = [
       },
     ],
   },
+  makeCamera("L", 12),
 ];
 
 const REPORT_TEXTS = ["수습 중...", "현장 확인 중...", "격리반 호출 중...", "인지재해 차단 중...", "보고서 대조 중...", "프로토콜 적용 중..."];
@@ -137,7 +107,7 @@ function runTests() {
     ["camera wraps right", getNextCamIndex(CAMERAS.length - 1, 1) === 0],
     ["frequency diff 2 succeeds", isTuned(50, 52) === true],
     ["frequency diff 3 fails", isTuned(50, 53) === false],
-    ["eleven cameras exist", CAMERAS.length === 11],
+    ["twelve cameras exist", CAMERAS.length === 12],
     ["all cameras have anomalies", CAMERAS.every((camera) => camera.anomalies.length > 0)],
     ["twelve monitor frames exist", CCTV_FRAMES.length === 12],
   ];
@@ -291,7 +261,7 @@ function App() {
       });
     }, 5200);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, signalFailure, overlay, monitorMotion, cctvOpen]);
+  }, [dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen]);
 
   useEffect(() => {
     if (dead || cleared || anomalyCam === null || overlay) return undefined;
@@ -702,7 +672,7 @@ function App() {
             ⌃
           </button>
           <button type="button" onPointerDown={press(() => setTurnedBack(true))} onClick={click(() => setTurnedBack(true))} className="control-button report-button">
-            리부팅
+            재부팅
           </button>
         </MonitorFrame>
       )}
