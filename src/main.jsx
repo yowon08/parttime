@@ -179,6 +179,7 @@ function App() {
   const [dead, setDead] = useState(false);
   const [cleared, setCleared] = useState(false);
   const [rebootRequired, setRebootRequired] = useState(false);
+  const [signalFailure, setSignalFailure] = useState(false);
   const [frequency, setFrequency] = useState(22);
   const [targetFrequency, setTargetFrequency] = useState(72);
   const [staticBurst, setStaticBurst] = useState(false);
@@ -234,7 +235,7 @@ function App() {
   }, [seconds, dead, cleared]);
 
   useEffect(() => {
-    if (dead || cleared || rebootRequired || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
     const timer = setInterval(() => {
       setAnomalyCam((prev) => {
         if (prev !== null) return prev;
@@ -248,7 +249,7 @@ function App() {
       });
     }, 5200);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, overlay, monitorMotion, cctvOpen]);
+  }, [dead, cleared, rebootRequired, signalFailure, overlay, monitorMotion, cctvOpen]);
 
   useEffect(() => {
     if (dead || cleared || anomalyCam === null || overlay) return undefined;
@@ -262,12 +263,12 @@ function App() {
   }, [anomalyAge, anomalyCam, overlay, dead, cleared]);
 
   useEffect(() => {
-    if (dead || cleared || rebootRequired || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
     const timer = setInterval(() => {
-      if (Math.random() < 0.28) triggerRebootFailure();
-    }, 15000);
+      if (Math.random() < 0.34) triggerRebootFailure();
+    }, 10000);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, overlay, monitorMotion, cctvOpen]);
+  }, [dead, cleared, rebootRequired, signalFailure, overlay, monitorMotion, cctvOpen]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -330,7 +331,7 @@ function App() {
   }
 
   function raiseMonitor() {
-    if (rebootRequired || overlay || dead || cleared || monitorMotion) return;
+    if (overlay || dead || cleared || monitorMotion) return;
     clearTimeout(raiseTimer.current);
     setTurnedBack(false);
     setMonitorMotion("raising");
@@ -366,6 +367,7 @@ function App() {
     setMonitorMotion("lowering");
     setMonitorFrame(CCTV_FRAMES.length);
     setCctvOpen(false);
+    if (!rebootRequired) setSignalFailure(false);
     pulseStatic(180);
 
     let frame = CCTV_FRAMES.length;
@@ -392,13 +394,13 @@ function App() {
   }
 
   function changeCam(step) {
-    if (!cctvOpen || rebootRequired || overlay || dead || cleared || monitorMotion) return;
+    if (!cctvOpen || rebootRequired || signalFailure || overlay || dead || cleared || monitorMotion) return;
     pulseStatic(240);
     setCamIndex((idx) => getNextCamIndex(idx, step));
   }
 
   function reportProblem() {
-    if (!cctvOpen || rebootRequired || overlay || dead || cleared || monitorMotion) return;
+    if (!cctvOpen || rebootRequired || signalFailure || overlay || dead || cleared || monitorMotion) return;
 
     if (currentHasAnomaly) {
       showOverlay("report", randomItem(REPORT_TEXTS), 1200, () => {
@@ -424,22 +426,19 @@ function App() {
   }
 
   function triggerRebootFailure() {
-    pulseStatic(420);
-    setTimeout(() => {
-      setCctvOpen(false);
-      setMonitorFrame(1);
-      setTurnedBack(false);
-      setRebootRequired(true);
-      setTargetFrequency(Math.floor(25 + Math.random() * 55));
-      setFrequency(Math.floor(Math.random() * 100));
-      showOverlay("system", "SIGNAL LOST", 900);
-    }, 240);
+    if (signalFailure) return;
+    setSignalFailure(true);
+    setRebootRequired(true);
+    setTargetFrequency(Math.floor(25 + Math.random() * 55));
+    setFrequency(Math.floor(Math.random() * 100));
+    pulseStatic(2300);
   }
 
   function tryReboot() {
     if (!isTuned(frequency, targetFrequency)) return;
     showOverlay("report", "신호 재동기화 중...", 1200, () => {
       setRebootRequired(false);
+      setSignalFailure(false);
       setTurnedBack(false);
       setCctvOpen(false);
       setMonitorFrame(1);
@@ -492,7 +491,7 @@ function App() {
       ) : monitorMotion ? (
         <MonitorFrame frame={monitorFrame} staticBurst={staticBurst} />
       ) : cctvOpen && !turnedBack ? (
-        <main className="screen cctv-screen noise" style={{ filter: `blur(${blurAmount}px)` }}>
+        <main className={`screen cctv-screen noise${signalFailure ? " signal-failing" : ""}`} style={{ filter: `blur(${blurAmount}px)` }}>
           <div className="cam-label">
             <strong>{currentCam.id}</strong>
             <span>{currentCam.name}</span>
@@ -500,19 +499,33 @@ function App() {
 
           <CameraVisual camera={currentCam} anomaly={currentAnomaly} warnings={warnings} staticBurst={staticBurst} />
 
-          <button type="button" onPointerDown={press(() => changeCam(-1))} onClick={click(() => changeCam(-1))} className="side-button side-left" aria-label="이전 카메라">
-            ‹
-          </button>
-          <button type="button" onPointerDown={press(() => changeCam(1))} onClick={click(() => changeCam(1))} className="side-button side-right" aria-label="다음 카메라">
-            ›
-          </button>
+          {signalFailure && (
+            <div className="signal-warning">
+              <span>SYSTEM NOTICE</span>
+              <strong>REBOOT REQUIRED</strong>
+              <p>VIDEO SIGNAL UNSTABLE / REAR PANEL SYNC REQUIRED</p>
+            </div>
+          )}
+
+          {!signalFailure && (
+            <>
+              <button type="button" onPointerDown={press(() => changeCam(-1))} onClick={click(() => changeCam(-1))} className="side-button side-left" aria-label="이전 카메라">
+                ‹
+              </button>
+              <button type="button" onPointerDown={press(() => changeCam(1))} onClick={click(() => changeCam(1))} className="side-button side-right" aria-label="다음 카메라">
+                ›
+              </button>
+            </>
+          )}
 
           <button type="button" onPointerDown={press(lowerMonitor)} onClick={click(lowerMonitor)} className="control-button lower-button" aria-label="CCTV 내리기">
             ⌄
           </button>
-          <button type="button" onPointerDown={press(reportProblem)} onClick={click(reportProblem)} className="control-button report-button">
-            문제 보고
-          </button>
+          {!rebootRequired && !signalFailure && (
+            <button type="button" onPointerDown={press(reportProblem)} onClick={click(reportProblem)} className="control-button report-button">
+              문제 보고
+            </button>
+          )}
         </main>
       ) : turnedBack ? (
         <main className="screen rear-screen noise">
@@ -555,7 +568,6 @@ function App() {
             type="button"
             onPointerDown={press(raiseMonitor)}
             onClick={click(raiseMonitor)}
-            disabled={rebootRequired}
             className="control-button lower-button"
             aria-label="CCTV 올리기"
           >
@@ -568,7 +580,7 @@ function App() {
       )}
 
       {overlay && (
-        <div className="overlay">
+        <div className={`overlay overlay-${overlay.kind}`}>
           <strong className={overlay.kind === "warning" || overlay.kind === "death" ? "danger" : ""}>{overlay.text}</strong>
           <span>{overlay.kind.toUpperCase()}</span>
         </div>

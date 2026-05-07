@@ -14,7 +14,7 @@ body {
   overflow: hidden;
   background: #000;
   color: #f5f5f5;
-  font-family: "Fixedsys", "MS Gothic", "MS PGothic", "DotumChe", "Courier New", monospace;
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", "DotumChe", monospace;
   font-smooth: never;
   -webkit-font-smoothing: none;
   text-rendering: geometricprecision;
@@ -48,6 +48,71 @@ button {
   background:
     radial-gradient(circle at center, transparent 0%, rgba(0, 0, 0, 0.28) 48%, rgba(0, 0, 0, 0.9) 100%),
     linear-gradient(to bottom, #161616, #020202 55%, #000);
+}
+
+.signal-failing .camera-image {
+  filter: grayscale(0.9) contrast(1.75) brightness(0.55) saturate(0.4);
+  animation: signal-collapse 0.16s infinite steps(2);
+}
+
+.signal-failing .cam-label,
+.signal-failing .hud-clock {
+  opacity: 0.48;
+  animation: jitter 0.12s infinite steps(2);
+}
+
+.signal-failing::before {
+  opacity: 0.48;
+}
+
+.signal-warning {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  z-index: 75;
+  width: min(520px, 74vw);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(245, 245, 244, 0.22);
+  background:
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 4px),
+    rgba(0, 0, 0, 0.46);
+  padding: 1rem 1.15rem;
+  color: rgba(245, 245, 244, 0.78);
+  text-align: left;
+  box-shadow:
+    inset 0 0 20px rgba(255, 255, 255, 0.035),
+    0 0 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(1px);
+  pointer-events: none;
+  animation: osd-flicker 1.25s infinite steps(2);
+}
+
+.signal-warning span,
+.signal-warning strong,
+.signal-warning p {
+  display: block;
+  margin: 0;
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
+  letter-spacing: 0.08em;
+  text-shadow: 1px 0 rgba(255, 255, 255, 0.18), 0 0 8px rgba(255, 255, 255, 0.16);
+}
+
+.signal-warning span {
+  margin-bottom: 0.45rem;
+  color: rgba(212, 212, 216, 0.58);
+  font-size: clamp(0.65rem, 1.2vw, 0.82rem);
+}
+
+.signal-warning strong {
+  color: rgba(245, 245, 244, 0.88);
+  font-size: clamp(1rem, 2.7vw, 2rem);
+}
+
+.signal-warning p {
+  margin-top: 0.55rem;
+  color: rgba(161, 161, 170, 0.72);
+  font-size: clamp(0.62rem, 1.1vw, 0.8rem);
+  line-height: 1.5;
 }
 
 .rear-screen {
@@ -94,19 +159,21 @@ button {
   top: clamp(16px, 3vw, 28px);
   z-index: 80;
   display: grid;
-  gap: 7px;
-  letter-spacing: 0.08em;
+  gap: 5px;
+  font-family: inherit;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   text-shadow:
     1px 0 rgba(255, 255, 255, 0.22),
-    -1px 0 rgba(255, 255, 255, 0.1),
-    0 0 12px rgba(180, 255, 210, 0.32);
+    0 0 8px rgba(180, 255, 210, 0.24);
   image-rendering: pixelated;
 }
 
 .hud-clock strong {
-  font-size: clamp(2.2rem, 5vw, 4.6rem);
+  font-size: clamp(0.9rem, 1.7vw, 1.2rem);
   font-weight: 900;
-  line-height: 0.9;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .hud-clock span {
@@ -124,13 +191,17 @@ button {
   gap: 7px;
   text-align: right;
   color: #d4d4d8;
-  letter-spacing: 0.1em;
-  text-shadow: 1px 0 rgba(255, 255, 255, 0.16), 0 0 10px rgba(180, 255, 210, 0.22);
+  font-family: inherit;
+  letter-spacing: 0.07em;
+  text-shadow:
+    1px 0 rgba(255, 255, 255, 0.18),
+    0 0 8px rgba(180, 255, 210, 0.2);
 }
 
 .cam-label strong {
-  font-size: clamp(1.8rem, 4vw, 3.4rem);
-  line-height: 0.95;
+  font-size: clamp(0.9rem, 1.8vw, 1.25rem);
+  font-weight: 900;
+  line-height: 1.1;
   color: #f8fafc;
 }
 
@@ -152,8 +223,25 @@ button {
   inset: 0;
   z-index: 5;
   background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 92px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 2px, transparent 2px 92px),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 4px),
     radial-gradient(circle at 50% 45%, transparent 0 28%, rgba(0, 0, 0, 0.3) 72%, rgba(0, 0, 0, 0.88) 100%);
+  pointer-events: none;
+}
+
+.camera-frame::after {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: 6;
+  background-image:
+    radial-gradient(circle at 12% 24%, rgba(255, 255, 255, 0.18) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 76% 62%, rgba(255, 255, 255, 0.13) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 42% 78%, rgba(255, 255, 255, 0.1) 0 1px, transparent 1.5px);
+  background-size: 13px 13px, 19px 19px, 29px 29px;
+  opacity: 0.18;
+  mix-blend-mode: screen;
+  animation: fine-noise 0.18s infinite steps(2);
   pointer-events: none;
 }
 
@@ -337,8 +425,10 @@ button {
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.38);
   color: rgba(255, 255, 255, 0.82);
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
   font-weight: 900;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.04em;
+  text-shadow: 1px 0 currentColor, 0 1px currentColor;
   box-shadow: 0 0 22px rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(2px);
 }
@@ -374,6 +464,7 @@ button {
 
 .sync-panel h1 {
   margin: 0 0 0.6rem;
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
   font-size: clamp(2rem, 5vw, 3.2rem);
 }
 
@@ -451,8 +542,11 @@ button {
   border-radius: 8px;
   background: rgba(9, 9, 11, 0.64);
   color: rgba(161, 161, 170, 0.72);
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
   font-size: clamp(1.7rem, 4vw, 2.8rem);
   font-weight: 900;
+  letter-spacing: 0.04em;
+  text-shadow: 1px 0 currentColor, 0 1px currentColor;
 }
 
 .reboot-button.ready {
@@ -502,18 +596,48 @@ button {
   justify-items: center;
   gap: 2rem;
   padding: 2rem;
-  background: #000;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.04), transparent 42%),
+    #000;
   text-align: center;
+}
+
+.overlay::before,
+.overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.overlay::before {
+  background:
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 72px);
+  opacity: 0.3;
+  mix-blend-mode: screen;
+}
+
+.overlay::after {
+  inset: 22%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow:
+    inset 0 0 20px rgba(255, 255, 255, 0.04),
+    0 0 18px rgba(255, 255, 255, 0.05);
 }
 
 .overlay strong {
   color: #f4f4f5;
-  font-size: clamp(2.3rem, 8vw, 6rem);
-  letter-spacing: 0.1em;
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
+  z-index: 1;
+  font-size: clamp(1.2rem, 3.8vw, 3.1rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
   line-height: 1.25;
   text-shadow:
-    1px 0 rgba(255, 255, 255, 0.16),
-    0 0 16px rgba(255, 255, 255, 0.22);
+    1px 0 currentColor,
+    0 0 10px rgba(255, 255, 255, 0.24);
+  animation: osd-flicker 1.7s infinite steps(2);
 }
 
 .overlay strong.danger {
@@ -521,9 +645,29 @@ button {
 }
 
 .overlay span {
+  z-index: 1;
   color: #52525b;
-  font-size: 0.85rem;
-  letter-spacing: 0.3em;
+  font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
+  font-size: clamp(0.75rem, 1.5vw, 1rem);
+  letter-spacing: 0.18em;
+}
+
+.overlay-report strong {
+  color: #d4d4d8;
+}
+
+.overlay-system strong {
+  color: #f5f5f4;
+}
+
+.overlay-warning::after,
+.overlay-death::after {
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+.overlay-warning span,
+.overlay-death span {
+  color: #7f1d1d;
 }
 
 .death-screen strong,
@@ -578,7 +722,7 @@ button {
     radial-gradient(circle at 70% 50%, rgba(255, 255, 255, 0.12) 0 1px, transparent 2px),
     repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 0 1px, transparent 2px 5px);
   background-size: 18px 18px, 24px 24px, 100% 5px;
-  opacity: 0.22;
+  opacity: 0.28;
   mix-blend-mode: screen;
   animation: jitter 0.16s infinite steps(2);
   pointer-events: none;
@@ -592,7 +736,7 @@ button {
   top: 0;
   z-index: 31;
   height: 34%;
-  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.14), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.18), transparent);
   animation: scan 2.2s linear infinite;
   pointer-events: none;
 }
@@ -664,6 +808,78 @@ button {
   100% {
     transform: translate(0, 0) skewX(0deg);
     filter: contrast(1.2);
+  }
+}
+
+@keyframes signal-collapse {
+  0% {
+    transform: translate(0, 0) scale(1);
+    clip-path: inset(0 0 0 0);
+  }
+
+  25% {
+    transform: translate(-1.1%, 0.4%) scale(1.012);
+    clip-path: inset(2% 0 0 0);
+  }
+
+  50% {
+    transform: translate(0.8%, -0.6%) scale(1.006);
+    clip-path: inset(0 0 3% 0);
+  }
+
+  75% {
+    transform: translate(-0.3%, 1%) scale(1.018);
+    clip-path: inset(1% 0 2% 0);
+  }
+
+  100% {
+    transform: translate(0, 0) scale(1);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes fine-noise {
+  0% {
+    transform: translate(0, 0);
+  }
+
+  25% {
+    transform: translate(-1%, 0.6%);
+  }
+
+  50% {
+    transform: translate(0.7%, -0.8%);
+  }
+
+  75% {
+    transform: translate(-0.4%, 1%);
+  }
+
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes osd-flicker {
+  0%,
+  100% {
+    opacity: 0.92;
+    transform: translate(0, 0);
+  }
+
+  18% {
+    opacity: 0.76;
+    transform: translate(0.4%, -0.4%);
+  }
+
+  44% {
+    opacity: 0.98;
+    transform: translate(-0.2%, 0.2%);
+  }
+
+  67% {
+    opacity: 0.84;
+    transform: translate(0.2%, 0);
   }
 }
 
