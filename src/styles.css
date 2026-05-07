@@ -370,6 +370,11 @@ button {
   background: #020202;
 }
 
+.camera-frame.is-jumpscare {
+  animation: k-jumpscare-shake 0.09s infinite steps(2);
+  transform-origin: center;
+}
+
 .camera-frame::before {
   content: "";
   position: absolute;
@@ -1110,6 +1115,32 @@ button {
 
   to {
     opacity: 1;
+  }
+}
+
+@keyframes k-jumpscare-shake {
+  0% {
+    transform: translate(0, 0) scale(1.03) rotate(0deg);
+  }
+
+  20% {
+    transform: translate(-2.4%, 1.4%) scale(1.06) rotate(-0.5deg);
+  }
+
+  40% {
+    transform: translate(2%, -1.8%) scale(1.055) rotate(0.45deg);
+  }
+
+  60% {
+    transform: translate(-1.4%, -1%) scale(1.065) rotate(-0.35deg);
+  }
+
+  80% {
+    transform: translate(1.8%, 1.6%) scale(1.05) rotate(0.3deg);
+  }
+
+  100% {
+    transform: translate(0, 0) scale(1.03) rotate(0deg);
   }
 }
 

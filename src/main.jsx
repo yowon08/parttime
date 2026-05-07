@@ -13,7 +13,8 @@ const AUDIO = {
 };
 const BGM_VOLUME = 0.28;
 const VHS_VOLUME = 0.24;
-const CLEAR_TIME_SECONDS = 240;
+const CLEAR_TIME_SECONDS = 480;
+const CLEAR_TIME_MINUTES = 360;
 const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
@@ -67,11 +68,10 @@ const CAMERAS = [
     name: "폐쇄 채널",
     offline: true,
     normal: "비활성화된 채널이다.",
-    forceAmbushDisabled: true,
     anomalies: [
       {
         image: "/cameras/Cameras/K-1.png",
-        escalationImage: "/cameras/Cameras/K-2.png",
+        escalationFrames: Array.from({ length: 7 }, (_, index) => `/cameras/Cameras/K-${index + 2}.png`),
         text: "꺼져 있어야 할 채널에 영상 신호가 들어와 있다.",
       },
     ],
@@ -84,7 +84,7 @@ const PRELOAD_IMAGES = [
   ...ELEVATOR_FRAMES,
   ...CAMERAS.flatMap((camera) => [
     camera.image,
-    ...camera.anomalies.flatMap((anomaly) => [anomaly.image, anomaly.escalationImage]),
+    ...camera.anomalies.flatMap((anomaly) => [anomaly.image, anomaly.escalationImage, ...(anomaly.escalationFrames ?? [])]),
   ]),
 ].filter(Boolean);
 
@@ -97,8 +97,8 @@ function randomItem(list) {
 }
 
 function getTimeText(seconds) {
-  const totalMinutes = Math.floor(seconds);
-  const hour = Math.min(4, Math.floor(totalMinutes / 60));
+  const totalMinutes = Math.floor((seconds / CLEAR_TIME_SECONDS) * CLEAR_TIME_MINUTES);
+  const hour = Math.min(6, Math.floor(totalMinutes / 60));
   const minute = String(totalMinutes % 60).padStart(2, "0");
   return `${hour === 0 ? 12 : hour}:${minute} AM`;
 }
@@ -114,8 +114,8 @@ function isTuned(current, target) {
 function runTests() {
   const tests = [
     ["time starts at midnight", getTimeText(0) === "12:00 AM"],
-    ["time reaches 1 AM at 60 seconds", getTimeText(60) === "1:00 AM"],
-    ["time reaches 4 AM at 240 seconds", getTimeText(CLEAR_TIME_SECONDS) === "4:00 AM"],
+    ["time reaches 1 AM at 80 seconds", getTimeText(80) === "1:00 AM"],
+    ["time reaches 6 AM at 480 seconds", getTimeText(CLEAR_TIME_SECONDS) === "6:00 AM"],
     ["camera wraps left", getNextCamIndex(0, -1) === CAMERAS.length - 1],
     ["camera wraps right", getNextCamIndex(CAMERAS.length - 1, 1) === 0],
     ["frequency diff 2 succeeds", isTuned(50, 52) === true],
@@ -140,11 +140,11 @@ function MonitorFrame({ frame, staticBurst, children }) {
   );
 }
 
-function CameraVisual({ camera, anomaly, warnings, staticBurst }) {
+function CameraVisual({ camera, anomaly, warnings, staticBurst, shaking }) {
   const src = anomaly ? anomaly.image : camera.image;
 
   return (
-    <div className="camera-frame">
+    <div className={`camera-frame${shaking ? " is-jumpscare" : ""}`}>
       {src ? (
         <img
           src={src}
@@ -228,6 +228,7 @@ function App() {
   const [cameraStress, setCameraStress] = useState(0);
   const [ambushPending, setAmbushPending] = useState(false);
   const [anomalyEscalated, setAnomalyEscalated] = useState(false);
+  const [escalationFrameIndex, setEscalationFrameIndex] = useState(null);
 
   const overlayTimer = useRef(null);
   const staticTimer = useRef(null);
@@ -241,15 +242,19 @@ function App() {
   const evOnRef = useRef(null);
   const evRideRef = useRef(null);
   const evOffRef = useRef(null);
+  const gameStageRef = useRef(null);
   const fadeTimers = useRef(new Map());
   const ignoreClickUntil = useRef(0);
   const tests = useMemo(() => runTests(), []);
   const currentCam = CAMERAS[camIndex];
   const currentHasAnomaly = anomalyCam === camIndex;
   const baseCurrentAnomaly = currentHasAnomaly ? currentCam.anomalies[anomalyVariant] : null;
-  const currentAnomaly = baseCurrentAnomaly && anomalyEscalated && baseCurrentAnomaly.escalationImage
+  const currentAnomaly = baseCurrentAnomaly && escalationFrameIndex !== null && baseCurrentAnomaly.escalationFrames
+    ? { ...baseCurrentAnomaly, image: baseCurrentAnomaly.escalationFrames[escalationFrameIndex] }
+    : baseCurrentAnomaly && anomalyEscalated && baseCurrentAnomaly.escalationImage
     ? { ...baseCurrentAnomaly, image: baseCurrentAnomaly.escalationImage }
     : baseCurrentAnomaly;
+  const jumpscareActive = currentHasAnomaly && escalationFrameIndex !== null;
   const blurAmount = warnings * 1.6;
   const timeText = getTimeText(seconds);
   const showCctvHud = cctvOpen && !turnedBack && !monitorMotion;
@@ -345,6 +350,7 @@ function App() {
           const nextCam = Math.floor(Math.random() * CAMERAS.length);
           setAnomalyAge(0);
           setAnomalyEscalated(false);
+          setEscalationFrameIndex(null);
           setAnomalyVariant(Math.floor(Math.random() * CAMERAS[nextCam].anomalies.length));
           return nextCam;
         }
@@ -439,9 +445,16 @@ function App() {
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [overlay, dead, cleared, monitorMotion, cctvOpen, turnedBack, frequency, rebootRequired, signalFailure, currentHasAnomaly]);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [gameStarted, overlay, dead, cleared, monitorMotion, cctvOpen, turnedBack, frequency, rebootRequired, signalFailure, currentHasAnomaly]);
+
+  useEffect(() => {
+    if (!gameStarted) return;
+    requestAnimationFrame(() => {
+      gameStageRef.current?.focus();
+    });
+  }, [gameStarted]);
 
   useEffect(() => {
     clearTimeout(lingerTimer.current);
@@ -469,7 +482,7 @@ function App() {
     if (
       !showCctvHud ||
       !currentHasAnomaly ||
-      !baseCurrentAnomaly?.escalationImage ||
+      !(baseCurrentAnomaly?.escalationImage || baseCurrentAnomaly?.escalationFrames) ||
       anomalyEscalated ||
       dead ||
       cleared ||
@@ -479,6 +492,11 @@ function App() {
     ) return undefined;
 
     escalationTimer.current = setTimeout(() => {
+      if (baseCurrentAnomaly?.escalationFrames?.length) {
+        setAnomalyEscalated(true);
+        setEscalationFrameIndex(0);
+        return;
+      }
       setAnomalyEscalated(true);
     }, 500);
 
@@ -494,6 +512,17 @@ function App() {
     signalFailure,
     overlay,
   ]);
+
+  useEffect(() => {
+    if (escalationFrameIndex === null || !baseCurrentAnomaly?.escalationFrames) return undefined;
+    if (escalationFrameIndex >= baseCurrentAnomaly.escalationFrames.length - 1) return undefined;
+
+    const timer = setTimeout(() => {
+      setEscalationFrameIndex((index) => index + 1);
+    }, 95);
+
+    return () => clearTimeout(timer);
+  }, [escalationFrameIndex, baseCurrentAnomaly]);
 
   function showOverlay(kind, text, duration = 1300, callback) {
     clearTimeout(overlayTimer.current);
@@ -558,6 +587,7 @@ function App() {
       setAnomalyVariant(Math.floor(Math.random() * CAMERAS[targetCamIndex].anomalies.length));
       setAnomalyAge(0);
       setAnomalyEscalated(false);
+      setEscalationFrameIndex(null);
     }, delay);
   }
 
@@ -655,6 +685,7 @@ function App() {
         setAnomalyVariant(null);
         setAnomalyAge(0);
         setAnomalyEscalated(false);
+        setEscalationFrameIndex(null);
         setCompletedReports((count) => count + 1);
       });
     } else {
@@ -671,6 +702,7 @@ function App() {
       setAnomalyVariant(null);
       setAnomalyAge(0);
       setAnomalyEscalated(false);
+      setEscalationFrameIndex(null);
     });
   }
 
@@ -749,7 +781,7 @@ function App() {
       )}
 
       {gameStarted && (
-        <div className={`game-stage${gameFadingIn ? " is-fading-in" : ""}`}>
+        <div ref={gameStageRef} className={`game-stage${gameFadingIn ? " is-fading-in" : ""}`} tabIndex={-1}>
 
       {showCctvHud && (
         <div className="hud-clock">
@@ -762,7 +794,7 @@ function App() {
       {cleared ? (
         <div className="clear-screen">
           <strong>관측 완료</strong>
-          <span>04:00 AM</span>
+          <span>06:00 AM</span>
           <button type="button" onClick={() => window.location.reload()}>다시 시작</button>
         </div>
       ) : monitorMotion ? (
@@ -774,7 +806,7 @@ function App() {
             <span>{currentCam.name}</span>
           </div>
 
-          <CameraVisual camera={currentCam} anomaly={currentAnomaly} warnings={warnings} staticBurst={staticBurst} />
+          <CameraVisual camera={currentCam} anomaly={currentAnomaly} warnings={warnings} staticBurst={staticBurst} shaking={jumpscareActive} />
 
           {signalFailure && (
             <div className="signal-warning">
