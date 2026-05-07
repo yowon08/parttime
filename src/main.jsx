@@ -133,7 +133,7 @@ function runTests() {
 
 function MonitorFrame({ frame, staticBurst, children }) {
   return (
-    <main className="screen monitor-screen noise">
+    <main className="screen monitor-screen">
       <img src={CCTV_FRAMES[frame - 1]} alt="" className="monitor-image" draggable="false" />
       {staticBurst && <div className="static-burst" />}
       {children}
