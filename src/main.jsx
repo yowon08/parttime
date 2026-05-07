@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { INTRO_LINES } from "./introLines.js";
 import "./styles.css";
 
 const CCTV_FRAMES = Array.from({ length: 12 }, (_, index) => `/cctv/frame_${String(index + 1).padStart(2, "0")}.png`);
@@ -16,6 +17,7 @@ const VHS_VOLUME = 0.24;
 const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
 const LINGER_AMBUSH_DELAY = 8000;
+const INTRO_LINE_DURATION = 3000;
 const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
@@ -177,7 +179,7 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst, shaking }) {
   );
 }
 
-function ElevatorIntro({ frame, ready, progress, onEnter, exiting }) {
+function ElevatorIntro({ frame, ready, progress, line, onEnter, exiting }) {
   const percent = Math.round(progress * 100);
 
   return (
@@ -186,11 +188,14 @@ function ElevatorIntro({ frame, ready, progress, onEnter, exiting }) {
         <img key={src} src={src} alt="" className={`elevator-image${src === frame ? " is-active" : ""}`} draggable="false" />
       ))}
       <div className="elevator-vibration" />
-      <section className="elevator-panel">
-        <span>{ready ? "G FLOOR" : "FACILITY DESCENT"}</span>
-        <strong>{ready ? "ARRIVAL CONFIRMED" : `LOADING ${percent}%`}</strong>
-        <p>{ready ? "관측 구역 진입 대기 중" : "하층 연구시설 접근 중 / 안전 안내를 확인하십시오"}</p>
-      </section>
+      {!ready && !line && (
+        <section className="elevator-panel">
+          <span>FACILITY DESCENT</span>
+          <strong>{`LOADING ${percent}%`}</strong>
+          <p>하층 연구시설 접근 중 / 안전 안내를 확인하십시오</p>
+        </section>
+      )}
+      {!ready && <div key={line} className="intro-subtitle">{line}</div>}
       {ready && (
         <button type="button" className="enter-button" onClick={onEnter}>
           진입
@@ -205,6 +210,9 @@ function App() {
   const [introReady, setIntroReady] = useState(false);
   const [introProgress, setIntroProgress] = useState(0);
   const [introFrame, setIntroFrame] = useState(0);
+  const [introLineIndex, setIntroLineIndex] = useState(0);
+  const [introAssetsLoaded, setIntroAssetsLoaded] = useState(false);
+  const [introLinesDone, setIntroLinesDone] = useState(false);
   const [introExiting, setIntroExiting] = useState(false);
   const [gameFadingIn, setGameFadingIn] = useState(false);
   const [camIndex, setCamIndex] = useState(0);
@@ -281,7 +289,6 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     const startedAt = Date.now();
-    const minDuration = 12000;
     let loaded = 0;
     const frameTimer = setInterval(() => {
       setIntroFrame((frame) => Math.min(3, frame + 1));
@@ -300,15 +307,11 @@ function App() {
       setIntroProgress(Math.min(0.98, loadProgress));
 
       if (loaded < PRELOAD_IMAGES.length) return;
-      const remaining = Math.max(0, minDuration - (Date.now() - startedAt));
+      const remaining = Math.max(0, INTRO_LINES.length * INTRO_LINE_DURATION - (Date.now() - startedAt));
       setTimeout(() => {
         if (cancelled) return;
-        clearInterval(frameTimer);
         setIntroProgress(1);
-        setIntroFrame(4);
-        setIntroReady(true);
-        evRideRef.current?.pause();
-        evOffRef.current?.play().catch(() => {});
+        setIntroAssetsLoaded(true);
       }, remaining);
     };
 
@@ -324,6 +327,29 @@ function App() {
       clearInterval(frameTimer);
     };
   }, []);
+
+  useEffect(() => {
+    let line = 0;
+    const timer = setInterval(() => {
+      line += 1;
+      if (line >= INTRO_LINES.length) {
+        clearInterval(timer);
+        setIntroLinesDone(true);
+        return;
+      }
+      setIntroLineIndex(line);
+    }, INTRO_LINE_DURATION);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!introAssetsLoaded || !introLinesDone || introReady) return;
+    setIntroFrame(4);
+    setIntroReady(true);
+    evRideRef.current?.pause();
+    evOffRef.current?.play().catch(() => {});
+  }, [introAssetsLoaded, introLinesDone, introReady]);
 
   useEffect(() => {
     if (!gameStarted || dead || cleared || !showCctvHud) return undefined;
@@ -803,6 +829,7 @@ function App() {
           frame={ELEVATOR_FRAMES[introFrame]}
           ready={introReady}
           progress={introProgress}
+          line={INTRO_LINES[introLineIndex]}
           onEnter={enterFacility}
           exiting={introExiting}
         />

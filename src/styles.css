@@ -177,6 +177,25 @@ button {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.intro-subtitle {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(118px, 18vh, 180px);
+  z-index: 11;
+  width: min(900px, 86vw);
+  transform: translateX(-50%);
+  padding: 0.6rem 1rem;
+  background: rgba(0, 0, 0, 0.72);
+  color: rgba(255, 255, 255, 0.94);
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: clamp(1rem, 2.1vw, 1.55rem);
+  font-weight: 500;
+  line-height: 1.55;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  animation: subtitle-fade 3s ease-in-out both;
+}
+
 .cctv-screen {
   background:
     radial-gradient(circle at center, transparent 0%, rgba(0, 0, 0, 0.28) 48%, rgba(0, 0, 0, 0.9) 100%),
@@ -1170,6 +1189,24 @@ button {
 
   to {
     opacity: 1;
+  }
+}
+
+@keyframes subtitle-fade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+
+  12%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -4px);
   }
 }
 
