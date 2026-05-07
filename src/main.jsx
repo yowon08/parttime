@@ -82,6 +82,27 @@ const CAMERAS = [
     normal: "녹슨 비상 계단 위로 약한 빛이 새어 들어온다.",
     anomalies: [{ image: "/cameras/Cameras/I-2.png", text: "계단 아래에서 기어 올라오는 개체가 보인다." }],
   },
+  {
+    id: "CAM 10",
+    name: "격리 병동",
+    image: "/cameras/Cameras/J-1.png",
+    normal: "낡은 병동 복도에 휠체어와 의료 장비가 놓여 있다.",
+    anomalies: [{ image: "/cameras/Cameras/J-2.png", text: "병동 안쪽에 있어서는 안 될 형체가 나타나 있다." }],
+  },
+  {
+    id: "CAM 11",
+    name: "폐쇄 채널",
+    offline: true,
+    normal: "비활성화된 채널이다.",
+    forceAmbushDisabled: true,
+    anomalies: [
+      {
+        image: "/cameras/Cameras/K-1.png",
+        escalationImage: "/cameras/Cameras/K-2.png",
+        text: "꺼져 있어야 할 채널에 영상 신호가 들어와 있다.",
+      },
+    ],
+  },
 ];
 
 const REPORT_TEXTS = ["수습 중...", "현장 확인 중...", "격리반 호출 중...", "인지재해 차단 중...", "보고서 대조 중...", "프로토콜 적용 중..."];
@@ -116,7 +137,7 @@ function runTests() {
     ["camera wraps right", getNextCamIndex(CAMERAS.length - 1, 1) === 0],
     ["frequency diff 2 succeeds", isTuned(50, 52) === true],
     ["frequency diff 3 fails", isTuned(50, 53) === false],
-    ["nine cameras exist", CAMERAS.length === 9],
+    ["eleven cameras exist", CAMERAS.length === 11],
     ["all cameras have anomalies", CAMERAS.every((camera) => camera.anomalies.length > 0)],
     ["twelve monitor frames exist", CCTV_FRAMES.length === 12],
   ];
@@ -141,23 +162,31 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst }) {
 
   return (
     <div className="camera-frame">
-      <img
-        src={src}
-        alt=""
-        className="camera-image"
-        draggable="false"
-        onError={(event) => {
-          event.currentTarget.style.display = "none";
-        }}
-      />
-      <div className="fallback-scene" aria-hidden="true">
-        <div className="fallback-rail fallback-rail-top" />
-        <div className="fallback-rail fallback-rail-mid" />
-        <div className="fallback-rail fallback-rail-bottom" />
-        <div className="fallback-door" />
-        <div className="fallback-light" />
-        {anomaly && <div className="fallback-anomaly" />}
-      </div>
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          className="camera-image"
+          draggable="false"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+          }}
+        />
+      ) : (
+        <div className="offline-feed">
+          <strong>-OFFLINE-</strong>
+        </div>
+      )}
+      {!camera.offline && (
+        <div className="fallback-scene" aria-hidden="true">
+          <div className="fallback-rail fallback-rail-top" />
+          <div className="fallback-rail fallback-rail-mid" />
+          <div className="fallback-rail fallback-rail-bottom" />
+          <div className="fallback-door" />
+          <div className="fallback-light" />
+          {anomaly && <div className="fallback-anomaly" />}
+        </div>
+      )}
       <div className="warning-wash" style={{ opacity: warnings * 0.045 }} />
       {staticBurst && <div className="static-burst" />}
     </div>
@@ -184,10 +213,16 @@ function App() {
   const [targetFrequency, setTargetFrequency] = useState(72);
   const [staticBurst, setStaticBurst] = useState(false);
   const [completedReports, setCompletedReports] = useState(0);
+  const [cameraStress, setCameraStress] = useState(0);
+  const [ambushPending, setAmbushPending] = useState(false);
+  const [anomalyEscalated, setAnomalyEscalated] = useState(false);
 
   const overlayTimer = useRef(null);
   const staticTimer = useRef(null);
   const raiseTimer = useRef(null);
+  const ambushTimer = useRef(null);
+  const lingerTimer = useRef(null);
+  const escalationTimer = useRef(null);
   const bgmRef = useRef(null);
   const onRef = useRef(null);
   const vhsRef = useRef(null);
@@ -196,7 +231,10 @@ function App() {
   const tests = useMemo(() => runTests(), []);
   const currentCam = CAMERAS[camIndex];
   const currentHasAnomaly = anomalyCam === camIndex;
-  const currentAnomaly = currentHasAnomaly ? currentCam.anomalies[anomalyVariant] : null;
+  const baseCurrentAnomaly = currentHasAnomaly ? currentCam.anomalies[anomalyVariant] : null;
+  const currentAnomaly = baseCurrentAnomaly && anomalyEscalated && baseCurrentAnomaly.escalationImage
+    ? { ...baseCurrentAnomaly, image: baseCurrentAnomaly.escalationImage }
+    : baseCurrentAnomaly;
   const blurAmount = warnings * 1.6;
   const timeText = getTimeText(seconds);
   const showCctvHud = cctvOpen && !turnedBack && !monitorMotion;
@@ -206,6 +244,9 @@ function App() {
       clearTimeout(overlayTimer.current);
       clearTimeout(staticTimer.current);
       clearTimeout(raiseTimer.current);
+      clearTimeout(ambushTimer.current);
+      clearTimeout(lingerTimer.current);
+      clearTimeout(escalationTimer.current);
       fadeTimers.current.forEach((timer) => clearInterval(timer));
     };
   }, []);
@@ -217,10 +258,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (dead || cleared) return undefined;
+    if (dead || cleared || !showCctvHud) return undefined;
     const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(timer);
-  }, [dead, cleared]);
+  }, [dead, cleared, showCctvHud]);
 
   useEffect(() => {
     if (seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
@@ -235,13 +276,14 @@ function App() {
   }, [seconds, dead, cleared]);
 
   useEffect(() => {
-    if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (dead || cleared || rebootRequired || signalFailure || ambushPending || overlay || monitorMotion || !cctvOpen) return undefined;
     const timer = setInterval(() => {
       setAnomalyCam((prev) => {
         if (prev !== null) return prev;
         if (Math.random() < 0.42) {
           const nextCam = Math.floor(Math.random() * CAMERAS.length);
           setAnomalyAge(0);
+          setAnomalyEscalated(false);
           setAnomalyVariant(Math.floor(Math.random() * CAMERAS[nextCam].anomalies.length));
           return nextCam;
         }
@@ -265,10 +307,12 @@ function App() {
   useEffect(() => {
     if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
     const timer = setInterval(() => {
-      if (Math.random() < 0.34) triggerRebootFailure();
+      const failureChance = Math.min(0.82, 0.2 + cameraStress * 0.09);
+      if (Math.random() < failureChance) triggerRebootFailure();
+      setCameraStress((stress) => Math.max(0, stress - 1));
     }, 10000);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, signalFailure, overlay, monitorMotion, cctvOpen]);
+  }, [dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen, cameraStress]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -276,6 +320,58 @@ function App() {
       showOverlay("death", randomItem(DEATH_TEXTS), 1500);
     }
   }, [warnings, dead]);
+
+  useEffect(() => {
+    clearTimeout(lingerTimer.current);
+    if (
+      !showCctvHud ||
+      currentCam.forceAmbushDisabled ||
+      dead ||
+      cleared ||
+      rebootRequired ||
+      signalFailure ||
+      overlay ||
+      anomalyCam !== null
+    ) return undefined;
+
+    lingerTimer.current = setTimeout(() => {
+      scheduleAmbush(camIndex, 0);
+    }, 12000);
+
+    return () => clearTimeout(lingerTimer.current);
+  }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
+
+  useEffect(() => {
+    clearTimeout(escalationTimer.current);
+
+    if (
+      !showCctvHud ||
+      !currentHasAnomaly ||
+      !baseCurrentAnomaly?.escalationImage ||
+      anomalyEscalated ||
+      dead ||
+      cleared ||
+      rebootRequired ||
+      signalFailure ||
+      overlay
+    ) return undefined;
+
+    escalationTimer.current = setTimeout(() => {
+      setAnomalyEscalated(true);
+    }, 500);
+
+    return () => clearTimeout(escalationTimer.current);
+  }, [
+    showCctvHud,
+    currentHasAnomaly,
+    baseCurrentAnomaly,
+    anomalyEscalated,
+    dead,
+    cleared,
+    rebootRequired,
+    signalFailure,
+    overlay,
+  ]);
 
   function showOverlay(kind, text, duration = 1300, callback) {
     clearTimeout(overlayTimer.current);
@@ -330,6 +426,24 @@ function App() {
     audio.play().catch(() => {});
   }
 
+  function scheduleAmbush(targetCamIndex, delay = 1000) {
+    clearTimeout(ambushTimer.current);
+    setAmbushPending(true);
+    ambushTimer.current = setTimeout(() => {
+      setAmbushPending(false);
+      if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen || turnedBack || anomalyCam !== null) return;
+      setAnomalyCam(targetCamIndex);
+      setAnomalyVariant(Math.floor(Math.random() * CAMERAS[targetCamIndex].anomalies.length));
+      setAnomalyAge(0);
+      setAnomalyEscalated(false);
+    }, delay);
+  }
+
+  function cancelAmbush() {
+    clearTimeout(ambushTimer.current);
+    setAmbushPending(false);
+  }
+
   function raiseMonitor() {
     if (overlay || dead || cleared || monitorMotion) return;
     clearTimeout(raiseTimer.current);
@@ -363,6 +477,7 @@ function App() {
 
   function lowerMonitor() {
     if (overlay || dead || cleared || monitorMotion) return;
+    cancelAmbush();
     clearTimeout(raiseTimer.current);
     setMonitorMotion("lowering");
     setMonitorFrame(CCTV_FRAMES.length);
@@ -395,8 +510,18 @@ function App() {
 
   function changeCam(step) {
     if (!cctvOpen || rebootRequired || signalFailure || overlay || dead || cleared || monitorMotion) return;
+    cancelAmbush();
     pulseStatic(240);
-    setCamIndex((idx) => getNextCamIndex(idx, step));
+    setCameraStress((stress) => Math.min(7, stress + 1));
+    setCamIndex((idx) => {
+      const nextIndex = getNextCamIndex(idx, step);
+
+      if (anomalyCam === null && Math.random() < 0.08) {
+        scheduleAmbush(nextIndex, 1000);
+      }
+
+      return nextIndex;
+    });
   }
 
   function reportProblem() {
@@ -407,6 +532,7 @@ function App() {
         setAnomalyCam(null);
         setAnomalyVariant(null);
         setAnomalyAge(0);
+        setAnomalyEscalated(false);
         setCompletedReports((count) => count + 1);
       });
     } else {
@@ -422,11 +548,13 @@ function App() {
       setAnomalyCam(null);
       setAnomalyVariant(null);
       setAnomalyAge(0);
+      setAnomalyEscalated(false);
     });
   }
 
   function triggerRebootFailure() {
     if (signalFailure) return;
+    cancelAmbush();
     setSignalFailure(true);
     setRebootRequired(true);
     setTargetFrequency(Math.floor(25 + Math.random() * 55));
@@ -574,7 +702,7 @@ function App() {
             ⌃
           </button>
           <button type="button" onPointerDown={press(() => setTurnedBack(true))} onClick={click(() => setTurnedBack(true))} className="control-button report-button">
-            뒤돌기
+            리부팅
           </button>
         </MonitorFrame>
       )}
