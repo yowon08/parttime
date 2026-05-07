@@ -11,9 +11,15 @@ const AUDIO = {
   evOn: "/songs/ev-on.mp3",
   evRide: "/songs/ev-ride.mp3",
   evOff: "/songs/ev-off.mp3",
+  cctvChange: "/songs/cctv-ch.mp3",
+  clear: "/songs/clear.mp3",
+  control: "/songs/control.mp3",
+  fix: "/songs/fix.mp3",
+  noise: "/songs/noise.mp3",
 };
 const BGM_VOLUME = 0.28;
 const VHS_VOLUME = 0.24;
+const SIGNAL_NOISE_VOLUME = 0.08;
 const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
 const LINGER_AMBUSH_DELAY = 8000;
@@ -256,9 +262,15 @@ function App() {
   const evOnRef = useRef(null);
   const evRideRef = useRef(null);
   const evOffRef = useRef(null);
+  const cctvChangeRef = useRef(null);
+  const clearRef = useRef(null);
+  const controlRef = useRef(null);
+  const fixRef = useRef(null);
+  const noiseRef = useRef(null);
   const gameStageRef = useRef(null);
   const fadeTimers = useRef(new Map());
   const ignoreClickUntil = useRef(0);
+  const lastControlSoundAt = useRef(0);
   const tests = useMemo(() => runTests(), []);
   const currentCam = CAMERAS[camIndex];
   const currentHasAnomaly = anomalyCam === camIndex;
@@ -288,6 +300,7 @@ function App() {
   useEffect(() => {
     if (bgmRef.current) bgmRef.current.volume = 0;
     if (vhsRef.current) vhsRef.current.volume = 0;
+    if (noiseRef.current) noiseRef.current.volume = 0;
   }, []);
 
   useEffect(() => {
@@ -367,6 +380,16 @@ function App() {
     const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(timer);
   }, [gameStarted, dead, cleared, showCctvHud]);
+
+  useEffect(() => {
+    if (signalFailure && showCctvHud && !dead && !cleared) {
+      fadeAudio(noiseRef.current, SIGNAL_NOISE_VOLUME, 260, { playBefore: true });
+      return undefined;
+    }
+
+    fadeAudio(noiseRef.current, 0, 220, { pauseAfter: true });
+    return undefined;
+  }, [signalFailure, showCctvHud, dead, cleared]);
 
   useEffect(() => {
     if (!gameStarted || seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
@@ -469,17 +492,17 @@ function App() {
         return;
       }
 
-      if (key === "shift" || event.code === "ShiftLeft" || event.code === "ShiftRight" || event.shiftKey) {
+      if (key === "shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {
         event.preventDefault();
-        if (!cctvOpen && !turnedBack) setTurnedBack(true);
-        else if (turnedBack) setTurnedBack(false);
+        if (!cctvOpen && !turnedBack) openRearPanel();
+        else if (turnedBack) closeRearPanel();
         return;
       }
 
       if (key === "a") {
         event.preventDefault();
         if (turnedBack) {
-          setFrequency((value) => Math.max(0, value - 1));
+          adjustFrequency(-1);
         } else {
           changeCam(-1);
         }
@@ -489,7 +512,7 @@ function App() {
       if (key === "d") {
         event.preventDefault();
         if (turnedBack) {
-          setFrequency((value) => Math.min(100, value + 1));
+          adjustFrequency(1);
         } else {
           changeCam(1);
         }
@@ -642,6 +665,49 @@ function App() {
     audio.play().catch(() => {});
   }
 
+  function playEffect(audio, volume = 0.55) {
+    if (!audio) return;
+
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = volume;
+    audio.play().catch(() => {});
+  }
+
+  function playControlSound() {
+    const now = Date.now();
+    if (now - lastControlSoundAt.current < 48) return;
+    lastControlSoundAt.current = now;
+    playEffect(controlRef.current, 0.42);
+  }
+
+  function adjustFrequency(step) {
+    setFrequency((value) => {
+      const next = Math.min(100, Math.max(0, value + step));
+      if (next !== value) playControlSound();
+      return next;
+    });
+  }
+
+  function setFrequencyFromInput(value) {
+    setFrequency((current) => {
+      if (current !== value) playControlSound();
+      return value;
+    });
+  }
+
+  function openRearPanel() {
+    if (turnedBack) return;
+    playEffect(fixRef.current, 0.5);
+    setTurnedBack(true);
+  }
+
+  function closeRearPanel() {
+    if (!turnedBack) return;
+    playEffect(fixRef.current, 0.5);
+    setTurnedBack(false);
+  }
+
   function scheduleAmbush(targetCamIndex, delay = 1000) {
     clearTimeout(ambushTimer.current);
     setAmbushPending(true);
@@ -728,6 +794,7 @@ function App() {
   function changeCam(step) {
     if (!cctvOpen || rebootRequired || signalFailure || overlay || dead || cleared || monitorMotion) return;
     cancelAmbush();
+    playEffect(cctvChangeRef.current, 0.48);
     pulseStatic(240);
     setCameraStress((stress) => Math.min(7, stress + 1));
     setCamIndex((idx) => {
@@ -783,6 +850,7 @@ function App() {
 
   function tryReboot() {
     if (!isTuned(frequency, targetFrequency)) return;
+    playEffect(clearRef.current, 0.58);
     showOverlay("report", "신호 재동기화 중...", 1200, () => {
       setRebootRequired(false);
       setSignalFailure(false);
@@ -834,6 +902,11 @@ function App() {
       <audio ref={evOnRef} src={AUDIO.evOn} preload="auto" />
       <audio ref={evRideRef} src={AUDIO.evRide} loop preload="auto" />
       <audio ref={evOffRef} src={AUDIO.evOff} preload="auto" />
+      <audio ref={cctvChangeRef} src={AUDIO.cctvChange} preload="auto" />
+      <audio ref={clearRef} src={AUDIO.clear} preload="auto" />
+      <audio ref={controlRef} src={AUDIO.control} preload="auto" />
+      <audio ref={fixRef} src={AUDIO.fix} preload="auto" />
+      <audio ref={noiseRef} src={AUDIO.noise} loop preload="auto" />
 
       {!gameStarted && (
         <ElevatorIntro
@@ -918,8 +991,8 @@ function App() {
               min="0"
               max="100"
               value={frequency}
-              onInput={(event) => setFrequency(Number(event.target.value))}
-              onChange={(event) => setFrequency(Number(event.target.value))}
+              onInput={(event) => setFrequencyFromInput(Number(event.target.value))}
+              onChange={(event) => setFrequencyFromInput(Number(event.target.value))}
               className="frequency-range"
             />
             <div className="frequency-grid">
@@ -938,7 +1011,7 @@ function App() {
               너무 오래 걸렸다면 강제 실패 처리
             </button>
           </section>
-          <button type="button" onPointerDown={press(() => setTurnedBack(false))} onClick={click(() => setTurnedBack(false))} className="control-button report-button">
+          <button type="button" onPointerDown={press(closeRearPanel)} onClick={click(closeRearPanel)} className="control-button report-button">
             <span>SHIFT</span>
             돌아가기
           </button>
@@ -955,7 +1028,7 @@ function App() {
             <span>SPACE</span>
             ⌃
           </button>
-          <button type="button" onPointerDown={press(() => setTurnedBack(true))} onClick={click(() => setTurnedBack(true))} className="control-button report-button">
+          <button type="button" onPointerDown={press(openRearPanel)} onClick={click(openRearPanel)} className="control-button report-button">
             <span>SHIFT</span>
             재부팅
           </button>
