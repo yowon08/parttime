@@ -15,6 +15,7 @@ const BGM_VOLUME = 0.28;
 const VHS_VOLUME = 0.24;
 const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
+const LINGER_AMBUSH_DELAY = 8000;
 const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
@@ -471,7 +472,7 @@ function App() {
 
     lingerTimer.current = setTimeout(() => {
       scheduleAmbush(camIndex, 0);
-    }, 12000);
+    }, LINGER_AMBUSH_DELAY);
 
     return () => clearTimeout(lingerTimer.current);
   }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
