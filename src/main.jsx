@@ -7,10 +7,14 @@ const AUDIO = {
   bgm: "/songs/bgm.mp3",
   on: "/songs/on.mp3",
   vhs: "/songs/vhs.mp3",
+  evOn: "/songs/ev-on.mp3",
+  evRide: "/songs/ev-ride.mp3",
+  evOff: "/songs/ev-off.mp3",
 };
 const BGM_VOLUME = 0.28;
 const VHS_VOLUME = 0.24;
 const CLEAR_TIME_SECONDS = 240;
+const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
   A: 4,
@@ -74,6 +78,15 @@ const CAMERAS = [
   },
   makeCamera("L", 12),
 ];
+
+const PRELOAD_IMAGES = [
+  ...CCTV_FRAMES,
+  ...ELEVATOR_FRAMES,
+  ...CAMERAS.flatMap((camera) => [
+    camera.image,
+    ...camera.anomalies.flatMap((anomaly) => [anomaly.image, anomaly.escalationImage]),
+  ]),
+].filter(Boolean);
 
 const REPORT_TEXTS = ["수습 중...", "현장 확인 중...", "격리반 호출 중...", "인지재해 차단 중...", "보고서 대조 중...", "프로토콜 적용 중..."];
 const WARNING_TEXTS = ["문제 보고 실패.", "관측 누락 기록됨.", "비인가 현상 확산 중.", "프로토콜 지연 감지.", "관측자 오류율 상승."];
@@ -157,13 +170,42 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst }) {
           {anomaly && <div className="fallback-anomaly" />}
         </div>
       )}
-      <div className="warning-wash" style={{ opacity: warnings * 0.045 }} />
+      <div className="warning-wash" />
       {staticBurst && <div className="static-burst" />}
     </div>
   );
 }
 
+function ElevatorIntro({ frame, ready, progress, onEnter, exiting }) {
+  const percent = Math.round(progress * 100);
+
+  return (
+    <main className={`screen elevator-intro${ready ? " is-arrived" : ""}${exiting ? " is-exiting" : ""}`}>
+      {ELEVATOR_FRAMES.map((src) => (
+        <img key={src} src={src} alt="" className={`elevator-image${src === frame ? " is-active" : ""}`} draggable="false" />
+      ))}
+      <div className="elevator-vibration" />
+      <section className="elevator-panel">
+        <span>{ready ? "G FLOOR" : "FACILITY DESCENT"}</span>
+        <strong>{ready ? "ARRIVAL CONFIRMED" : `LOADING ${percent}%`}</strong>
+        <p>{ready ? "관측 구역 진입 대기 중" : "하층 연구시설 접근 중 / 안전 안내를 확인하십시오"}</p>
+      </section>
+      {ready && (
+        <button type="button" className="enter-button" onClick={onEnter}>
+          진입
+        </button>
+      )}
+    </main>
+  );
+}
+
 function App() {
+  const [gameStarted, setGameStarted] = useState(false);
+  const [introReady, setIntroReady] = useState(false);
+  const [introProgress, setIntroProgress] = useState(0);
+  const [introFrame, setIntroFrame] = useState(0);
+  const [introExiting, setIntroExiting] = useState(false);
+  const [gameFadingIn, setGameFadingIn] = useState(false);
   const [camIndex, setCamIndex] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [cctvOpen, setCctvOpen] = useState(false);
@@ -196,6 +238,9 @@ function App() {
   const bgmRef = useRef(null);
   const onRef = useRef(null);
   const vhsRef = useRef(null);
+  const evOnRef = useRef(null);
+  const evRideRef = useRef(null);
+  const evOffRef = useRef(null);
   const fadeTimers = useRef(new Map());
   const ignoreClickUntil = useRef(0);
   const tests = useMemo(() => runTests(), []);
@@ -222,19 +267,65 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (bgmRef.current) bgmRef.current.volume = BGM_VOLUME;
+    if (bgmRef.current) bgmRef.current.volume = 0;
     if (vhsRef.current) vhsRef.current.volume = 0;
-    primeAudio();
   }, []);
 
   useEffect(() => {
-    if (dead || cleared || !showCctvHud) return undefined;
-    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(timer);
-  }, [dead, cleared, showCctvHud]);
+    let cancelled = false;
+    const startedAt = Date.now();
+    const minDuration = 12000;
+    let loaded = 0;
+    const frameTimer = setInterval(() => {
+      setIntroFrame((frame) => Math.min(3, frame + 1));
+    }, 3000);
+
+    evOnRef.current && (evOnRef.current.volume = 0.55);
+    evRideRef.current && (evRideRef.current.volume = 0.32);
+    evOffRef.current && (evOffRef.current.volume = 0.58);
+    evOnRef.current?.play().catch(() => {});
+    evRideRef.current?.play().catch(() => {});
+
+    const completeOne = () => {
+      if (cancelled) return;
+      loaded += 1;
+      const loadProgress = loaded / PRELOAD_IMAGES.length;
+      setIntroProgress(Math.min(0.98, loadProgress));
+
+      if (loaded < PRELOAD_IMAGES.length) return;
+      const remaining = Math.max(0, minDuration - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (cancelled) return;
+        clearInterval(frameTimer);
+        setIntroProgress(1);
+        setIntroFrame(4);
+        setIntroReady(true);
+        evRideRef.current?.pause();
+        evOffRef.current?.play().catch(() => {});
+      }, remaining);
+    };
+
+    PRELOAD_IMAGES.forEach((src) => {
+      const image = new Image();
+      image.onload = completeOne;
+      image.onerror = completeOne;
+      image.src = src;
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(frameTimer);
+    };
+  }, []);
 
   useEffect(() => {
-    if (seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
+    if (!gameStarted || dead || cleared || !showCctvHud) return undefined;
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [gameStarted, dead, cleared, showCctvHud]);
+
+  useEffect(() => {
+    if (!gameStarted || seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
     clearTimeout(overlayTimer.current);
     setCleared(true);
     setCctvOpen(false);
@@ -243,10 +334,10 @@ function App() {
     setOverlay(null);
     fadeAudio(vhsRef.current, 0, 500, { pauseAfter: true });
     fadeAudio(bgmRef.current, BGM_VOLUME, 900, { playBefore: true });
-  }, [seconds, dead, cleared]);
+  }, [gameStarted, seconds, dead, cleared]);
 
   useEffect(() => {
-    if (dead || cleared || rebootRequired || signalFailure || ambushPending || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (!gameStarted || dead || cleared || signalFailure || ambushPending || overlay || monitorMotion) return undefined;
     const timer = setInterval(() => {
       setAnomalyCam((prev) => {
         if (prev !== null) return prev;
@@ -261,28 +352,28 @@ function App() {
       });
     }, 5200);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen]);
+  }, [gameStarted, dead, cleared, signalFailure, ambushPending, overlay, monitorMotion]);
 
   useEffect(() => {
-    if (dead || cleared || anomalyCam === null || overlay) return undefined;
+    if (!gameStarted || dead || cleared || anomalyCam === null || overlay || !showCctvHud || rebootRequired || signalFailure) return undefined;
     const timer = setInterval(() => setAnomalyAge((age) => age + 1), 1000);
     return () => clearInterval(timer);
-  }, [dead, cleared, anomalyCam, overlay]);
+  }, [gameStarted, dead, cleared, anomalyCam, overlay, showCctvHud, rebootRequired, signalFailure]);
 
   useEffect(() => {
-    if (dead || cleared || anomalyCam === null || overlay || anomalyAge < 13) return;
+    if (!gameStarted || dead || cleared || anomalyCam === null || overlay || !showCctvHud || rebootRequired || signalFailure || anomalyAge < 13) return;
     failReport();
-  }, [anomalyAge, anomalyCam, overlay, dead, cleared]);
+  }, [gameStarted, anomalyAge, anomalyCam, overlay, dead, cleared, showCctvHud, rebootRequired, signalFailure]);
 
   useEffect(() => {
-    if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
+    if (!gameStarted || dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen) return undefined;
     const timer = setInterval(() => {
       const failureChance = Math.min(0.82, 0.2 + cameraStress * 0.09);
       if (Math.random() < failureChance) triggerRebootFailure();
       setCameraStress((stress) => Math.max(0, stress - 1));
     }, 10000);
     return () => clearInterval(timer);
-  }, [dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen, cameraStress]);
+  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, ambushPending, overlay, monitorMotion, cctvOpen, cameraStress]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -290,6 +381,67 @@ function App() {
       showOverlay("death", randomItem(DEATH_TEXTS), 1500);
     }
   }, [warnings, dead]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!gameStarted || overlay || dead || cleared || monitorMotion) return;
+
+      const key = event.key.toLowerCase();
+
+      if (event.repeat && !(turnedBack && (key === "a" || key === "d"))) return;
+
+      if (key === " " || key === "spacebar") {
+        event.preventDefault();
+        primeAudio();
+        if (cctvOpen && !turnedBack) {
+          lowerMonitor();
+        } else if (!cctvOpen && !turnedBack) {
+          raiseMonitor();
+        }
+        return;
+      }
+
+      if (key === "enter") {
+        event.preventDefault();
+        primeAudio();
+        if (turnedBack) {
+          tryReboot();
+        } else {
+          reportProblem();
+        }
+        return;
+      }
+
+      if (key === "shift" || event.code === "ShiftLeft" || event.code === "ShiftRight" || event.shiftKey) {
+        event.preventDefault();
+        if (!cctvOpen && !turnedBack) setTurnedBack(true);
+        else if (turnedBack) setTurnedBack(false);
+        return;
+      }
+
+      if (key === "a") {
+        event.preventDefault();
+        if (turnedBack) {
+          setFrequency((value) => Math.max(0, value - 1));
+        } else {
+          changeCam(-1);
+        }
+        return;
+      }
+
+      if (key === "d") {
+        event.preventDefault();
+        if (turnedBack) {
+          setFrequency((value) => Math.min(100, value + 1));
+        } else {
+          changeCam(1);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [overlay, dead, cleared, monitorMotion, cctvOpen, turnedBack, frequency, rebootRequired, signalFailure, currentHasAnomaly]);
 
   useEffect(() => {
     clearTimeout(lingerTimer.current);
@@ -537,7 +689,6 @@ function App() {
     showOverlay("report", "신호 재동기화 중...", 1200, () => {
       setRebootRequired(false);
       setSignalFailure(false);
-      setTurnedBack(false);
       setCctvOpen(false);
       setMonitorFrame(1);
     });
@@ -566,11 +717,39 @@ function App() {
     };
   }
 
+  function enterFacility() {
+    setIntroExiting(true);
+    evRideRef.current?.pause();
+    evOffRef.current?.pause();
+    setTimeout(() => {
+      setGameStarted(true);
+      setGameFadingIn(true);
+      fadeAudio(bgmRef.current, BGM_VOLUME, 900, { playBefore: true });
+      setTimeout(() => setGameFadingIn(false), 900);
+    }, 700);
+  }
+
   return (
     <div className={`game warning-${warnings}`}>
       <audio ref={bgmRef} src={AUDIO.bgm} loop preload="auto" />
       <audio ref={vhsRef} src={AUDIO.vhs} loop preload="auto" />
       <audio ref={onRef} src={AUDIO.on} preload="auto" />
+      <audio ref={evOnRef} src={AUDIO.evOn} preload="auto" />
+      <audio ref={evRideRef} src={AUDIO.evRide} loop preload="auto" />
+      <audio ref={evOffRef} src={AUDIO.evOff} preload="auto" />
+
+      {!gameStarted && (
+        <ElevatorIntro
+          frame={ELEVATOR_FRAMES[introFrame]}
+          ready={introReady}
+          progress={introProgress}
+          onEnter={enterFacility}
+          exiting={introExiting}
+        />
+      )}
+
+      {gameStarted && (
+        <div className={`game-stage${gameFadingIn ? " is-fading-in" : ""}`}>
 
       {showCctvHud && (
         <div className="hud-clock">
@@ -608,19 +787,23 @@ function App() {
           {!signalFailure && (
             <>
               <button type="button" onPointerDown={press(() => changeCam(-1))} onClick={click(() => changeCam(-1))} className="side-button side-left" aria-label="이전 카메라">
+                <span>A</span>
                 ‹
               </button>
               <button type="button" onPointerDown={press(() => changeCam(1))} onClick={click(() => changeCam(1))} className="side-button side-right" aria-label="다음 카메라">
+                <span>D</span>
                 ›
               </button>
             </>
           )}
 
           <button type="button" onPointerDown={press(lowerMonitor)} onClick={click(lowerMonitor)} className="control-button lower-button" aria-label="CCTV 내리기">
+            <span>SPACE</span>
             ⌄
           </button>
           {!rebootRequired && !signalFailure && (
             <button type="button" onPointerDown={press(reportProblem)} onClick={click(reportProblem)} className="control-button report-button">
+              <span>ENTER</span>
               문제 보고
             </button>
           )}
@@ -650,6 +833,7 @@ function App() {
               <i className="scope-target" style={{ left: `${targetFrequency}%` }} />
             </div>
             <button type="button" onPointerDown={press(tryReboot)} onClick={click(tryReboot)} className={`reboot-button ${isTuned(frequency, targetFrequency) ? "ready" : ""}`}>
+              <span>ENTER</span>
               재부팅
             </button>
             <button type="button" onPointerDown={press(forceRebootFail)} onClick={click(forceRebootFail)} className="delay-button">
@@ -657,7 +841,8 @@ function App() {
             </button>
           </section>
           <button type="button" onPointerDown={press(() => setTurnedBack(false))} onClick={click(() => setTurnedBack(false))} className="control-button report-button">
-            앞 보기
+            <span>SHIFT</span>
+            돌아가기
           </button>
         </main>
       ) : (
@@ -669,9 +854,11 @@ function App() {
             className="control-button lower-button"
             aria-label="CCTV 올리기"
           >
+            <span>SPACE</span>
             ⌃
           </button>
           <button type="button" onPointerDown={press(() => setTurnedBack(true))} onClick={click(() => setTurnedBack(true))} className="control-button report-button">
+            <span>SHIFT</span>
             재부팅
           </button>
         </MonitorFrame>
@@ -692,6 +879,8 @@ function App() {
       )}
 
       <div className="test-badge">TEST {tests.passed}/{tests.total}</div>
+        </div>
+      )}
     </div>
   );
 }
