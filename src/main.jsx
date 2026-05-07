@@ -18,6 +18,8 @@ const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
 const LINGER_AMBUSH_DELAY = 8000;
 const INTRO_LINE_DURATION = 3000;
+const INTRO_DIALOGUE_DELAY = 3000;
+const INTRO_PAUSE_TOKEN = "dlay";
 const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
@@ -181,6 +183,7 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst, shaking }) {
 
 function ElevatorIntro({ frame, ready, progress, line, onEnter, exiting }) {
   const percent = Math.round(progress * 100);
+  const subtitle = line?.trim().toLowerCase() === INTRO_PAUSE_TOKEN ? "" : line;
 
   return (
     <main className={`screen elevator-intro${ready ? " is-arrived" : ""}${exiting ? " is-exiting" : ""}`}>
@@ -195,7 +198,7 @@ function ElevatorIntro({ frame, ready, progress, line, onEnter, exiting }) {
           <p>하층 연구시설 접근 중 / 안전 안내를 확인하십시오</p>
         </section>
       )}
-      {!ready && <div key={line} className="intro-subtitle">{line}</div>}
+      {!ready && subtitle && <div key={line} className="intro-subtitle">{subtitle}</div>}
       {ready && (
         <button type="button" className="enter-button" onClick={onEnter}>
           진입
@@ -212,6 +215,7 @@ function App() {
   const [introFrame, setIntroFrame] = useState(0);
   const [introLineIndex, setIntroLineIndex] = useState(0);
   const [introAssetsLoaded, setIntroAssetsLoaded] = useState(false);
+  const [introDialogueStarted, setIntroDialogueStarted] = useState(false);
   const [introLinesDone, setIntroLinesDone] = useState(false);
   const [introExiting, setIntroExiting] = useState(false);
   const [gameFadingIn, setGameFadingIn] = useState(false);
@@ -288,7 +292,6 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const startedAt = Date.now();
     let loaded = 0;
     const frameTimer = setInterval(() => {
       setIntroFrame((frame) => Math.min(3, frame + 1));
@@ -307,12 +310,8 @@ function App() {
       setIntroProgress(Math.min(0.98, loadProgress));
 
       if (loaded < PRELOAD_IMAGES.length) return;
-      const remaining = Math.max(0, INTRO_LINES.length * INTRO_LINE_DURATION - (Date.now() - startedAt));
-      setTimeout(() => {
-        if (cancelled) return;
-        setIntroProgress(1);
-        setIntroAssetsLoaded(true);
-      }, remaining);
+      setIntroProgress(1);
+      setIntroAssetsLoaded(true);
     };
 
     PRELOAD_IMAGES.forEach((src) => {
@@ -329,6 +328,18 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!introAssetsLoaded) return undefined;
+
+    const timer = setTimeout(() => {
+      setIntroDialogueStarted(true);
+    }, INTRO_DIALOGUE_DELAY);
+
+    return () => clearTimeout(timer);
+  }, [introAssetsLoaded]);
+
+  useEffect(() => {
+    if (!introDialogueStarted) return undefined;
+
     let line = 0;
     const timer = setInterval(() => {
       line += 1;
@@ -341,7 +352,7 @@ function App() {
     }, INTRO_LINE_DURATION);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [introDialogueStarted]);
 
   useEffect(() => {
     if (!introAssetsLoaded || !introLinesDone || introReady) return;
@@ -829,7 +840,7 @@ function App() {
           frame={ELEVATOR_FRAMES[introFrame]}
           ready={introReady}
           progress={introProgress}
-          line={INTRO_LINES[introLineIndex]}
+          line={introDialogueStarted ? INTRO_LINES[introLineIndex] : ""}
           onEnter={enterFacility}
           exiting={introExiting}
         />
