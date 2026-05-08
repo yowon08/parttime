@@ -28,7 +28,15 @@ const INTRO_LINE_DURATION = 3000;
 const INTRO_DIALOGUE_DELAY = 3000;
 const INTRO_SKIP_ARRIVAL_DELAY = 2000;
 const INTRO_PAUSE_TOKEN = "dlay";
-const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
+const ELEVATOR_IMAGE = "/ev/ev.png";
+const INTRO_VOICE_FILES = Array.from({ length: 17 }, (_, index) => `/voice/${index + 1}.mp3`);
+let introVoiceIndex = 0;
+const INTRO_DIALOGUE = INTRO_LINES.map((line) => {
+  if (line.trim().toLowerCase() === INTRO_PAUSE_TOKEN) return { line, voice: null, pause: true };
+  const voice = INTRO_VOICE_FILES[introVoiceIndex] ?? null;
+  introVoiceIndex += 1;
+  return { line, voice, pause: false };
+});
 
 const CAMERA_FILE_COUNTS = {
   A: 4,
@@ -94,7 +102,7 @@ const CAMERAS = [
 
 const PRELOAD_IMAGES = [
   ...CCTV_FRAMES,
-  ...ELEVATOR_FRAMES,
+  ELEVATOR_IMAGE,
   ...CAMERAS.flatMap((camera) => [
     camera.image,
     ...camera.anomalies.flatMap((anomaly) => [anomaly.image, anomaly.escalationImage, ...(anomaly.escalationFrames ?? [])]),
@@ -189,15 +197,13 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst, shaking }) {
   );
 }
 
-function ElevatorIntro({ frame, ready, progress, line, onEnter, onSkip, exiting }) {
+function ElevatorIntro({ ready, progress, line, onEnter, onSkip, exiting }) {
   const percent = Math.round(progress * 100);
   const subtitle = line?.trim().toLowerCase() === INTRO_PAUSE_TOKEN ? "" : line;
 
   return (
     <main className={`screen elevator-intro${ready ? " is-arrived" : ""}${exiting ? " is-exiting" : ""}`}>
-      {ELEVATOR_FRAMES.map((src) => (
-        <img key={src} src={src} alt="" className={`elevator-image${src === frame ? " is-active" : ""}`} draggable="false" />
-      ))}
+      <img src={ELEVATOR_IMAGE} alt="" className="elevator-image is-active" draggable="false" />
       <div className="elevator-vibration" />
       {!ready && !line && (
         <section className="elevator-panel">
@@ -225,7 +231,6 @@ function App() {
   const [gameStarted, setGameStarted] = useState(false);
   const [introReady, setIntroReady] = useState(false);
   const [introProgress, setIntroProgress] = useState(0);
-  const [introFrame, setIntroFrame] = useState(0);
   const [introLineIndex, setIntroLineIndex] = useState(0);
   const [introAssetsLoaded, setIntroAssetsLoaded] = useState(false);
   const [introDialogueStarted, setIntroDialogueStarted] = useState(false);
@@ -260,6 +265,10 @@ function App() {
   const overlayTimer = useRef(null);
   const staticTimer = useRef(null);
   const raiseTimer = useRef(null);
+  const introDialogueTimer = useRef(null);
+  const introVoiceRef = useRef(null);
+  const introAudioContextRef = useRef(null);
+  const introVoiceNodesRef = useRef(null);
   const ambushTimer = useRef(null);
   const lingerTimer = useRef(null);
   const escalationTimer = useRef(null);
@@ -298,6 +307,9 @@ function App() {
       clearTimeout(overlayTimer.current);
       clearTimeout(staticTimer.current);
       clearTimeout(raiseTimer.current);
+      clearTimeout(introDialogueTimer.current);
+      introVoiceRef.current?.pause();
+      disconnectIntroVoiceEffect();
       clearTimeout(ambushTimer.current);
       clearTimeout(lingerTimer.current);
       clearTimeout(escalationTimer.current);
@@ -314,9 +326,6 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let loaded = 0;
-    const frameTimer = setInterval(() => {
-      setIntroFrame((frame) => Math.min(3, frame + 1));
-    }, 3000);
 
     evOnRef.current && (evOnRef.current.volume = 0.55);
     evRideRef.current && (evRideRef.current.volume = 0.32);
@@ -344,7 +353,6 @@ function App() {
 
     return () => {
       cancelled = true;
-      clearInterval(frameTimer);
     };
   }, []);
 
@@ -361,23 +369,61 @@ function App() {
   useEffect(() => {
     if (!introDialogueStarted || introSkipped) return undefined;
 
-    let line = 0;
-    const timer = setInterval(() => {
-      line += 1;
-      if (line >= INTRO_LINES.length) {
-        clearInterval(timer);
-        setIntroLinesDone(true);
-        return;
-      }
-      setIntroLineIndex(line);
-    }, INTRO_LINE_DURATION);
+    const dialogue = INTRO_DIALOGUE[introLineIndex];
+    if (!dialogue) {
+      setIntroLinesDone(true);
+      return undefined;
+    }
 
-    return () => clearInterval(timer);
-  }, [introDialogueStarted, introSkipped]);
+    const advanceDialogue = () => {
+      setIntroLineIndex((line) => {
+        const nextLine = line + 1;
+        if (nextLine >= INTRO_DIALOGUE.length) {
+          setIntroLinesDone(true);
+          return line;
+        }
+        return nextLine;
+      });
+    };
+
+    if (dialogue.pause || !dialogue.voice) {
+      disconnectIntroVoiceEffect();
+      introDialogueTimer.current = setTimeout(advanceDialogue, INTRO_LINE_DURATION);
+      return () => clearTimeout(introDialogueTimer.current);
+    }
+
+    const audio = new Audio(dialogue.voice);
+    introVoiceRef.current?.pause();
+    disconnectIntroVoiceEffect();
+    introVoiceRef.current = audio;
+    audio.volume = 0.92;
+    applyIntroVoiceEffect(audio);
+
+    const handleDone = () => {
+      if (introVoiceRef.current === audio) introVoiceRef.current = null;
+      disconnectIntroVoiceEffect();
+      advanceDialogue();
+    };
+    const handleError = () => {
+      introDialogueTimer.current = setTimeout(handleDone, INTRO_LINE_DURATION);
+    };
+
+    audio.addEventListener("ended", handleDone, { once: true });
+    audio.addEventListener("error", handleError, { once: true });
+    audio.play().catch(handleError);
+
+    return () => {
+      clearTimeout(introDialogueTimer.current);
+      audio.removeEventListener("ended", handleDone);
+      audio.removeEventListener("error", handleError);
+      audio.pause();
+      if (introVoiceRef.current === audio) introVoiceRef.current = null;
+      disconnectIntroVoiceEffect();
+    };
+  }, [introDialogueStarted, introSkipped, introLineIndex]);
 
   useEffect(() => {
     if (!introAssetsLoaded || !introLinesDone || introReady) return;
-    setIntroFrame(4);
     setIntroReady(true);
     evRideRef.current?.pause();
     evOffRef.current?.play().catch(() => {});
@@ -685,6 +731,60 @@ function App() {
     audio.play().catch(() => {});
   }
 
+  function disconnectIntroVoiceEffect() {
+    const nodes = introVoiceNodesRef.current;
+    if (!nodes) return;
+
+    nodes.forEach((node) => {
+      try {
+        node.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    });
+    introVoiceNodesRef.current = null;
+  }
+
+  function applyIntroVoiceEffect(audio) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const context = introAudioContextRef.current ?? new AudioContext();
+    introAudioContextRef.current = context;
+    context.resume().catch(() => {});
+
+    disconnectIntroVoiceEffect();
+
+    const source = context.createMediaElementSource(audio);
+    const highpass = context.createBiquadFilter();
+    const lowpass = context.createBiquadFilter();
+    const dry = context.createGain();
+    const wet = context.createGain();
+    const delay = context.createDelay(0.35);
+    const feedback = context.createGain();
+
+    highpass.type = "highpass";
+    highpass.frequency.value = 180;
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 3600;
+    dry.gain.value = 0.86;
+    wet.gain.value = 0.12;
+    delay.delayTime.value = 0.115;
+    feedback.gain.value = 0.18;
+
+    source.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(dry);
+    dry.connect(context.destination);
+    lowpass.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(wet);
+    wet.connect(context.destination);
+
+    introVoiceNodesRef.current = [source, highpass, lowpass, dry, wet, delay, feedback];
+  }
+
   function playControlSound() {
     const now = Date.now();
     if (now - lastControlSoundAt.current < 48) return;
@@ -911,7 +1011,11 @@ function App() {
 
   function skipIntroDialogue() {
     if (introReady || introSkipped) return;
-    setIntroLineIndex(INTRO_LINES.length - 1);
+    clearTimeout(introDialogueTimer.current);
+    introVoiceRef.current?.pause();
+    introVoiceRef.current = null;
+    disconnectIntroVoiceEffect();
+    setIntroLineIndex(INTRO_DIALOGUE.length - 1);
     setIntroDialogueStarted(true);
     setIntroSkipped(true);
   }
@@ -932,10 +1036,9 @@ function App() {
 
       {!gameStarted && (
         <ElevatorIntro
-          frame={ELEVATOR_FRAMES[introFrame]}
           ready={introReady}
           progress={introProgress}
-          line={introDialogueStarted && !introSkipped ? INTRO_LINES[introLineIndex] : ""}
+          line={introDialogueStarted && !introSkipped ? INTRO_DIALOGUE[introLineIndex]?.line ?? "" : ""}
           onEnter={enterFacility}
           onSkip={skipIntroDialogue}
           exiting={introExiting}

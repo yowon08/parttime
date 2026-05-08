@@ -216,7 +216,6 @@ button {
   line-height: 1.55;
   text-align: center;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
-  animation: subtitle-fade 3s ease-in-out both;
 }
 
 .cctv-screen {
