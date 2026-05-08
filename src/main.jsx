@@ -23,19 +23,21 @@ const SIGNAL_NOISE_VOLUME = 0.08;
 const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
 const LINGER_AMBUSH_DELAY = 8000;
+const REBOOT_CHECK_INTERVAL = 8000;
 const INTRO_LINE_DURATION = 3000;
 const INTRO_DIALOGUE_DELAY = 3000;
+const INTRO_SKIP_ARRIVAL_DELAY = 2000;
 const INTRO_PAUSE_TOKEN = "dlay";
 const ELEVATOR_FRAMES = ["/ev/ev-4.png", "/ev/ev-3.png", "/ev/ev-2.png", "/ev/ev-1.png", "/ev/ev-g.png"];
 
 const CAMERA_FILE_COUNTS = {
   A: 4,
   B: 2,
-  C: 3,
+  C: 4,
   D: 2,
   E: 3,
   F: 3,
-  G: 2,
+  G: 5,
   H: 2,
   I: 4,
   J: 3,
@@ -187,7 +189,7 @@ function CameraVisual({ camera, anomaly, warnings, staticBurst, shaking }) {
   );
 }
 
-function ElevatorIntro({ frame, ready, progress, line, onEnter, exiting }) {
+function ElevatorIntro({ frame, ready, progress, line, onEnter, onSkip, exiting }) {
   const percent = Math.round(progress * 100);
   const subtitle = line?.trim().toLowerCase() === INTRO_PAUSE_TOKEN ? "" : line;
 
@@ -205,6 +207,11 @@ function ElevatorIntro({ frame, ready, progress, line, onEnter, exiting }) {
         </section>
       )}
       {!ready && subtitle && <div key={line} className="intro-subtitle">{subtitle}</div>}
+      {!ready && line && (
+        <button type="button" className="intro-skip-button" onClick={onSkip}>
+          SKIP
+        </button>
+      )}
       {ready && (
         <button type="button" className="enter-button" onClick={onEnter}>
           진입
@@ -223,6 +230,7 @@ function App() {
   const [introAssetsLoaded, setIntroAssetsLoaded] = useState(false);
   const [introDialogueStarted, setIntroDialogueStarted] = useState(false);
   const [introLinesDone, setIntroLinesDone] = useState(false);
+  const [introSkipped, setIntroSkipped] = useState(false);
   const [introExiting, setIntroExiting] = useState(false);
   const [gameFadingIn, setGameFadingIn] = useState(false);
   const [camIndex, setCamIndex] = useState(0);
@@ -247,7 +255,6 @@ function App() {
   const [cameraStress, setCameraStress] = useState(0);
   const [ambushPending, setAmbushPending] = useState(false);
   const [anomalyEscalated, setAnomalyEscalated] = useState(false);
-  const [rebootSuppressed, setRebootSuppressed] = useState(false);
   const [escalationFrameIndex, setEscalationFrameIndex] = useState(null);
 
   const overlayTimer = useRef(null);
@@ -271,6 +278,7 @@ function App() {
   const fadeTimers = useRef(new Map());
   const ignoreClickUntil = useRef(0);
   const lastControlSoundAt = useRef(0);
+  const cameraStressRef = useRef(0);
   const tests = useMemo(() => runTests(), []);
   const currentCam = CAMERAS[camIndex];
   const currentHasAnomaly = anomalyCam === camIndex;
@@ -351,7 +359,7 @@ function App() {
   }, [introAssetsLoaded]);
 
   useEffect(() => {
-    if (!introDialogueStarted) return undefined;
+    if (!introDialogueStarted || introSkipped) return undefined;
 
     let line = 0;
     const timer = setInterval(() => {
@@ -365,7 +373,7 @@ function App() {
     }, INTRO_LINE_DURATION);
 
     return () => clearInterval(timer);
-  }, [introDialogueStarted]);
+  }, [introDialogueStarted, introSkipped]);
 
   useEffect(() => {
     if (!introAssetsLoaded || !introLinesDone || introReady) return;
@@ -374,6 +382,16 @@ function App() {
     evRideRef.current?.pause();
     evOffRef.current?.play().catch(() => {});
   }, [introAssetsLoaded, introLinesDone, introReady]);
+
+  useEffect(() => {
+    if (!introSkipped || introReady) return undefined;
+
+    const timer = setTimeout(() => {
+      setIntroLinesDone(true);
+    }, INTRO_SKIP_ARRIVAL_DELAY);
+
+    return () => clearTimeout(timer);
+  }, [introSkipped, introReady]);
 
   useEffect(() => {
     if (!gameStarted || dead || cleared || !showCctvHud) return undefined;
@@ -390,6 +408,10 @@ function App() {
     fadeAudio(noiseRef.current, 0, 220, { pauseAfter: true });
     return undefined;
   }, [signalFailure, showCctvHud, dead, cleared]);
+
+  useEffect(() => {
+    cameraStressRef.current = cameraStress;
+  }, [cameraStress]);
 
   useEffect(() => {
     if (!gameStarted || seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
@@ -440,7 +462,6 @@ function App() {
       cleared ||
       rebootRequired ||
       signalFailure ||
-      rebootSuppressed ||
       ambushPending ||
       anomalyCam !== null ||
       overlay ||
@@ -448,12 +469,16 @@ function App() {
       !cctvOpen
     ) return undefined;
     const timer = setInterval(() => {
-      const failureChance = Math.min(0.82, 0.2 + cameraStress * 0.09);
+      const failureChance = Math.min(0.88, 0.26 + cameraStressRef.current * 0.1);
       if (Math.random() < failureChance) triggerRebootFailure();
-      setCameraStress((stress) => Math.max(0, stress - 1));
-    }, 10000);
+      setCameraStress((stress) => {
+        const nextStress = Math.max(0, stress - 1);
+        cameraStressRef.current = nextStress;
+        return nextStress;
+      });
+    }, REBOOT_CHECK_INTERVAL);
     return () => clearInterval(timer);
-  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, rebootSuppressed, ambushPending, anomalyCam, overlay, monitorMotion, cctvOpen, cameraStress]);
+  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, ambushPending, anomalyCam, overlay, monitorMotion, cctvOpen]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -549,20 +574,6 @@ function App() {
 
     return () => clearTimeout(lingerTimer.current);
   }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
-
-  useEffect(() => {
-    if (!showCctvHud || dead || cleared || rebootRequired || signalFailure || overlay || anomalyCam !== null) {
-      setRebootSuppressed(false);
-      return undefined;
-    }
-
-    setRebootSuppressed(true);
-    const timer = setTimeout(() => {
-      setRebootSuppressed(false);
-    }, LINGER_AMBUSH_DELAY + 500);
-
-    return () => clearTimeout(timer);
-  }, [showCctvHud, camIndex, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
 
   useEffect(() => {
     clearTimeout(escalationTimer.current);
@@ -796,7 +807,11 @@ function App() {
     cancelAmbush();
     playEffect(cctvChangeRef.current, 0.48);
     pulseStatic(240);
-    setCameraStress((stress) => Math.min(7, stress + 1));
+    setCameraStress((stress) => {
+      const nextStress = Math.min(7, stress + 1);
+      cameraStressRef.current = nextStress;
+      return nextStress;
+    });
     setCamIndex((idx) => {
       const nextIndex = getNextCamIndex(idx, step);
 
@@ -894,6 +909,13 @@ function App() {
     }, 700);
   }
 
+  function skipIntroDialogue() {
+    if (introReady || introSkipped) return;
+    setIntroLineIndex(INTRO_LINES.length - 1);
+    setIntroDialogueStarted(true);
+    setIntroSkipped(true);
+  }
+
   return (
     <div className={`game warning-${warnings}`}>
       <audio ref={bgmRef} src={AUDIO.bgm} loop preload="auto" />
@@ -913,8 +935,9 @@ function App() {
           frame={ELEVATOR_FRAMES[introFrame]}
           ready={introReady}
           progress={introProgress}
-          line={introDialogueStarted ? INTRO_LINES[introLineIndex] : ""}
+          line={introDialogueStarted && !introSkipped ? INTRO_LINES[introLineIndex] : ""}
           onEnter={enterFacility}
+          onSkip={skipIntroDialogue}
           exiting={introExiting}
         />
       )}

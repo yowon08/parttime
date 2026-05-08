@@ -134,7 +134,8 @@ button {
 .elevator-panel span,
 .elevator-panel strong,
 .elevator-panel p,
-.enter-button {
+.enter-button,
+.intro-skip-button {
   font-family: "Terminal", "Fixedsys", "Perfect DOS VGA 437", "MS Gothic", monospace;
   letter-spacing: 0.08em;
   text-shadow: 1px 0 rgba(255, 255, 255, 0.14), 0 0 8px rgba(255, 255, 255, 0.12);
@@ -175,6 +176,28 @@ button {
 
 .enter-button:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.intro-skip-button {
+  position: absolute;
+  right: clamp(16px, 3vw, 34px);
+  top: clamp(14px, 3vw, 28px);
+  z-index: 12;
+  height: 30px;
+  min-width: 58px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.62;
+}
+
+.intro-skip-button:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.76);
+  opacity: 0.9;
 }
 
 .intro-subtitle {
@@ -679,6 +702,7 @@ button {
   z-index: 20;
   width: min(760px, 90vw);
   transform: translate(-50%, -50%);
+  animation: sync-panel-rise 0.46s cubic-bezier(0.16, 1, 0.3, 1) both;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.68);
@@ -1189,6 +1213,18 @@ button {
 
   to {
     opacity: 1;
+  }
+}
+
+@keyframes sync-panel-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 34%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
   }
 }
 
