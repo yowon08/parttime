@@ -84,6 +84,10 @@ button {
   animation: elevator-soft-ride 1.9s infinite ease-in-out;
 }
 
+.elevator-intro.is-arrived .elevator-image.is-active {
+  animation: elevator-arrival-settle 1.25s cubic-bezier(0.18, 0.9, 0.2, 1) both;
+}
+
 .elevator-intro::before,
 .elevator-intro::after,
 .elevator-vibration {
@@ -159,7 +163,7 @@ button {
 
 .enter-button {
   position: absolute;
-  left: 50%;
+  left: 44%;
   top: 50%;
   z-index: 10;
   transform: translate(-50%, -50%);
@@ -1202,6 +1206,36 @@ button {
 
   72% {
     transform: translateY(-0.08%);
+  }
+}
+
+@keyframes elevator-arrival-settle {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+
+  12% {
+    transform: translateY(1.6%) scale(1.006);
+  }
+
+  24% {
+    transform: translateY(-0.85%) scale(1.003);
+  }
+
+  38% {
+    transform: translateY(0.48%) scale(1.0015);
+  }
+
+  54% {
+    transform: translateY(-0.22%) scale(1.0008);
+  }
+
+  72% {
+    transform: translateY(0.08%) scale(1.0003);
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
   }
 }
 

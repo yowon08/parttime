@@ -622,6 +622,27 @@ function App() {
   }, [gameStarted]);
 
   useEffect(() => {
+    if (gameStarted) return undefined;
+
+    const handleIntroKeyDown = (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+
+      if (introReady) {
+        enterFacility();
+        return;
+      }
+
+      if (introDialogueStarted && !introSkipped) {
+        skipIntroDialogue();
+      }
+    };
+
+    document.addEventListener("keydown", handleIntroKeyDown, true);
+    return () => document.removeEventListener("keydown", handleIntroKeyDown, true);
+  }, [gameStarted, introReady, introDialogueStarted, introSkipped]);
+
+  useEffect(() => {
     clearTimeout(lingerTimer.current);
     if (
       !showCctvHud ||
