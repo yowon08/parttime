@@ -163,7 +163,7 @@ button {
 
 .enter-button {
   position: absolute;
-  left: 44%;
+  left: 45.5%;
   top: 50%;
   z-index: 10;
   transform: translate(-50%, -50%);
@@ -314,9 +314,14 @@ button {
 }
 
 .rear-screen {
+  animation: rear-screen-rise 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
   background:
     radial-gradient(circle at 50% 35%, rgba(150, 150, 150, 0.16), transparent 44%),
     linear-gradient(to bottom, #060606, #000, #070707);
+}
+
+.rear-screen.is-closing {
+  animation: rear-screen-drop 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .lowered-screen {
@@ -705,7 +710,6 @@ button {
   z-index: 20;
   width: min(760px, 90vw);
   transform: translate(-50%, -50%);
-  animation: sync-panel-rise 0.46s cubic-bezier(0.16, 1, 0.3, 1) both;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.68);
@@ -1249,15 +1253,27 @@ button {
   }
 }
 
-@keyframes sync-panel-rise {
+@keyframes rear-screen-rise {
   from {
     opacity: 0;
-    transform: translate(-50%, 34%);
+    transform: translateY(100%);
   }
 
   to {
     opacity: 1;
-    transform: translate(-50%, -50%);
+    transform: translateY(0);
+  }
+}
+
+@keyframes rear-screen-drop {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(100%);
   }
 }
 

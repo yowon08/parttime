@@ -15,6 +15,7 @@ const AUDIO = {
   clear: "/songs/clear.mp3",
   control: "/songs/control.mp3",
   fix: "/songs/fix.mp3",
+  jumpscare: "/songs/jumpscare.mp3",
   noise: "/songs/noise.mp3",
 };
 const BGM_VOLUME = 0.28;
@@ -27,9 +28,13 @@ const REBOOT_CHECK_INTERVAL = 8000;
 const INTRO_LINE_DURATION = 3000;
 const INTRO_DIALOGUE_DELAY = 3000;
 const INTRO_SKIP_ARRIVAL_DELAY = 2000;
+const REAR_PANEL_CLOSE_DURATION = 520;
 const INTRO_PAUSE_TOKEN = "dlay";
 const ELEVATOR_IMAGE = "/ev/ev.png";
 const INTRO_VOICE_FILES = Array.from({ length: 17 }, (_, index) => `/voice/${index + 1}.mp3`);
+const AMBIENT_SFX_FILES = Object.values(
+  import.meta.glob("/public/sfx/*.{mp3,wav,ogg}", { eager: true, query: "?url", import: "default" })
+);
 let introVoiceIndex = 0;
 const INTRO_DIALOGUE = INTRO_LINES.map((line) => {
   if (line.trim().toLowerCase() === INTRO_PAUSE_TOKEN) return { line, voice: null, pause: true };
@@ -242,6 +247,7 @@ function App() {
   const [seconds, setSeconds] = useState(0);
   const [cctvOpen, setCctvOpen] = useState(false);
   const [turnedBack, setTurnedBack] = useState(false);
+  const [rearPanelClosing, setRearPanelClosing] = useState(false);
   const [monitorMotion, setMonitorMotion] = useState(null);
   const [monitorFrame, setMonitorFrame] = useState(1);
   const [anomalyCam, setAnomalyCam] = useState(null);
@@ -265,10 +271,14 @@ function App() {
   const overlayTimer = useRef(null);
   const staticTimer = useRef(null);
   const raiseTimer = useRef(null);
+  const rearPanelTimer = useRef(null);
   const introDialogueTimer = useRef(null);
   const introVoiceRef = useRef(null);
   const introAudioContextRef = useRef(null);
   const introVoiceNodesRef = useRef(null);
+  const ambientSfxTimer = useRef(null);
+  const ambientSfxAudio = useRef(null);
+  const lastAmbientSfx = useRef(null);
   const ambushTimer = useRef(null);
   const lingerTimer = useRef(null);
   const escalationTimer = useRef(null);
@@ -282,6 +292,7 @@ function App() {
   const clearRef = useRef(null);
   const controlRef = useRef(null);
   const fixRef = useRef(null);
+  const jumpscareRef = useRef(null);
   const noiseRef = useRef(null);
   const gameStageRef = useRef(null);
   const fadeTimers = useRef(new Map());
@@ -301,15 +312,20 @@ function App() {
   const blurAmount = warnings * 1.6;
   const timeText = getTimeText(seconds);
   const showCctvHud = cctvOpen && !turnedBack && !monitorMotion;
+  const cam11JumpscareLoopActive = anomalyCam !== null && CAMERAS[anomalyCam]?.offline && anomalyEscalated;
 
   useEffect(() => {
     return () => {
       clearTimeout(overlayTimer.current);
       clearTimeout(staticTimer.current);
       clearTimeout(raiseTimer.current);
+      clearTimeout(rearPanelTimer.current);
       clearTimeout(introDialogueTimer.current);
       introVoiceRef.current?.pause();
       disconnectIntroVoiceEffect();
+      clearTimeout(ambientSfxTimer.current);
+      ambientSfxAudio.current?.pause();
+      jumpscareRef.current?.pause();
       clearTimeout(ambushTimer.current);
       clearTimeout(lingerTimer.current);
       clearTimeout(escalationTimer.current);
@@ -466,6 +482,37 @@ function App() {
   }, [gameStarted, dead, cleared, showCctvHud]);
 
   useEffect(() => {
+    if (!gameStarted || dead || cleared) return undefined;
+
+    const scheduleNextSfx = (delay = 22000 + Math.random() * 26000) => {
+      if (!AMBIENT_SFX_FILES.length) return;
+      clearTimeout(ambientSfxTimer.current);
+      ambientSfxTimer.current = setTimeout(() => {
+        const candidates = AMBIENT_SFX_FILES.length > 1
+          ? AMBIENT_SFX_FILES.filter((file) => file !== lastAmbientSfx.current)
+          : AMBIENT_SFX_FILES;
+        const selected = randomItem(candidates);
+        lastAmbientSfx.current = selected;
+        const audio = new Audio(selected);
+        ambientSfxAudio.current?.pause();
+        ambientSfxAudio.current = audio;
+        audio.volume = 0.42;
+        audio.play().catch(() => {});
+        audio.addEventListener("ended", () => scheduleNextSfx(), { once: true });
+        audio.addEventListener("error", () => scheduleNextSfx(), { once: true });
+      }, delay);
+    };
+
+    scheduleNextSfx();
+
+    return () => {
+      clearTimeout(ambientSfxTimer.current);
+      ambientSfxAudio.current?.pause();
+      ambientSfxAudio.current = null;
+    };
+  }, [gameStarted, dead, cleared]);
+
+  useEffect(() => {
     if (signalFailure && showCctvHud && !dead && !cleared) {
       fadeAudio(noiseRef.current, SIGNAL_NOISE_VOLUME, 260, { playBefore: true });
       return undefined;
@@ -474,6 +521,21 @@ function App() {
     fadeAudio(noiseRef.current, 0, 220, { pauseAfter: true });
     return undefined;
   }, [signalFailure, showCctvHud, dead, cleared]);
+
+  useEffect(() => {
+    const audio = jumpscareRef.current;
+    if (!audio) return undefined;
+
+    if (cam11JumpscareLoopActive && !dead && !cleared) {
+      audio.volume = 0.7;
+      audio.play().catch(() => {});
+      return undefined;
+    }
+
+    audio.pause();
+    audio.currentTime = 0;
+    return undefined;
+  }, [cam11JumpscareLoopActive, dead, cleared]);
 
   useEffect(() => {
     cameraStressRef.current = cameraStress;
@@ -559,7 +621,7 @@ function App() {
 
       const key = event.key.toLowerCase();
 
-      if (event.repeat && !(turnedBack && (key === "a" || key === "d"))) return;
+      if (event.repeat && !(turnedBack && !rearPanelClosing && (key === "a" || key === "d"))) return;
 
       if (key === " " || key === "spacebar") {
         event.preventDefault();
@@ -575,7 +637,7 @@ function App() {
       if (key === "enter") {
         event.preventDefault();
         primeAudio();
-        if (turnedBack) {
+        if (turnedBack && !rearPanelClosing) {
           tryReboot();
         } else {
           reportProblem();
@@ -586,13 +648,13 @@ function App() {
       if (key === "shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {
         event.preventDefault();
         if (!cctvOpen && !turnedBack) openRearPanel();
-        else if (turnedBack) closeRearPanel();
+        else if (turnedBack && !rearPanelClosing) closeRearPanel();
         return;
       }
 
       if (key === "a") {
         event.preventDefault();
-        if (turnedBack) {
+        if (turnedBack && !rearPanelClosing) {
           adjustFrequency(-1);
         } else {
           changeCam(-1);
@@ -602,7 +664,7 @@ function App() {
 
       if (key === "d") {
         event.preventDefault();
-        if (turnedBack) {
+        if (turnedBack && !rearPanelClosing) {
           adjustFrequency(1);
         } else {
           changeCam(1);
@@ -612,7 +674,7 @@ function App() {
 
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [gameStarted, overlay, dead, cleared, monitorMotion, cctvOpen, turnedBack, frequency, rebootRequired, signalFailure, currentHasAnomaly]);
+  }, [gameStarted, overlay, dead, cleared, monitorMotion, cctvOpen, turnedBack, rearPanelClosing, frequency, rebootRequired, signalFailure, currentHasAnomaly]);
 
   useEffect(() => {
     if (!gameStarted) return;
@@ -850,14 +912,21 @@ function App() {
 
   function openRearPanel() {
     if (turnedBack) return;
+    clearTimeout(rearPanelTimer.current);
+    setRearPanelClosing(false);
     playEffect(fixRef.current, 0.5);
     setTurnedBack(true);
   }
 
   function closeRearPanel() {
-    if (!turnedBack) return;
+    if (!turnedBack || rearPanelClosing) return;
+    clearTimeout(rearPanelTimer.current);
     playEffect(fixRef.current, 0.5);
-    setTurnedBack(false);
+    setRearPanelClosing(true);
+    rearPanelTimer.current = setTimeout(() => {
+      setTurnedBack(false);
+      setRearPanelClosing(false);
+    }, REAR_PANEL_CLOSE_DURATION);
   }
 
   function scheduleAmbush(targetCamIndex, delay = 1000) {
@@ -1073,6 +1142,7 @@ function App() {
       <audio ref={clearRef} src={AUDIO.clear} preload="auto" />
       <audio ref={controlRef} src={AUDIO.control} preload="auto" />
       <audio ref={fixRef} src={AUDIO.fix} preload="auto" />
+      <audio ref={jumpscareRef} src={AUDIO.jumpscare} loop preload="auto" />
       <audio ref={noiseRef} src={AUDIO.noise} loop preload="auto" />
 
       {!gameStarted && (
@@ -1147,7 +1217,7 @@ function App() {
           )}
         </main>
       ) : turnedBack ? (
-        <main className="screen rear-screen noise">
+        <main className={`screen rear-screen noise${rearPanelClosing ? " is-closing" : ""}`}>
           <div className="panel-label">REAR PANEL<br />FREQUENCY SYNC</div>
           <section className="sync-panel">
             <h1>주파수 재동기화</h1>
