@@ -396,16 +396,36 @@ function App() {
     introVoiceRef.current?.pause();
     disconnectIntroVoiceEffect();
     introVoiceRef.current = audio;
+    audio.preload = "auto";
     audio.volume = 0.92;
     applyIntroVoiceEffect(audio);
+    let done = false;
+    let fallbackQueued = false;
 
     const handleDone = () => {
+      if (done) return;
+      done = true;
       if (introVoiceRef.current === audio) introVoiceRef.current = null;
       disconnectIntroVoiceEffect();
       advanceDialogue();
     };
     const handleError = () => {
-      introDialogueTimer.current = setTimeout(handleDone, INTRO_LINE_DURATION);
+      if (fallbackQueued || done) return;
+      fallbackQueued = true;
+      const queueFallback = () => {
+        clearTimeout(introDialogueTimer.current);
+        const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration * 1000 : INTRO_LINE_DURATION;
+        introDialogueTimer.current = setTimeout(handleDone, Math.max(INTRO_LINE_DURATION, duration));
+      };
+
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        queueFallback();
+        return;
+      }
+
+      audio.addEventListener("loadedmetadata", queueFallback, { once: true });
+      audio.load();
+      introDialogueTimer.current = setTimeout(handleDone, INTRO_LINE_DURATION * 2);
     };
 
     audio.addEventListener("ended", handleDone, { once: true });
