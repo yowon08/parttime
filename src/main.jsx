@@ -26,6 +26,7 @@ const VHS_VOLUME = 0.24;
 const SIGNAL_NOISE_VOLUME = 0.08;
 const CLEAR_TIME_SECONDS = 480;
 const CLEAR_TIME_MINUTES = 360;
+const DAY_ONE_REPORT_TIME_BONUS_SECONDS = 20;
 const LINGER_AMBUSH_DELAY = 8000;
 const REBOOT_CHECK_INTERVAL = 8000;
 const INTRO_LINE_DURATION = 3000;
@@ -205,6 +206,12 @@ function getNextCamIndex(index, step) {
 
 function isTuned(current, target) {
   return Math.abs(current - target) <= 2;
+}
+
+function getRandomAnomalyVariant(camera) {
+  const gRunIndex = camera.anomalies.findIndex((anomaly) => anomaly.special === "gRun");
+  if (gRunIndex >= 0 && Math.random() < 0.68) return gRunIndex;
+  return Math.floor(Math.random() * camera.anomalies.length);
 }
 
 function getDay2StageFromDanger(value) {
@@ -774,7 +781,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
           setGRunFrameIndex(null);
           setGRunRedout(false);
           setGRunThump(false);
-          setAnomalyVariant(Math.floor(Math.random() * CAMERAS[nextCam].anomalies.length));
+          setAnomalyVariant(getRandomAnomalyVariant(CAMERAS[nextCam]));
           return nextCam;
         }
         return prev;
@@ -1185,7 +1192,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
       setAmbushPending(false);
       if (dead || cleared || rebootRequired || signalFailure || overlay || monitorMotion || !cctvOpen || turnedBack || anomalyCam !== null) return;
       setAnomalyCam(targetCamIndex);
-      setAnomalyVariant(Math.floor(Math.random() * CAMERAS[targetCamIndex].anomalies.length));
+      setAnomalyVariant(getRandomAnomalyVariant(CAMERAS[targetCamIndex]));
       setAnomalyAge(0);
       setAnomalyEscalated(false);
       setEscalationFrameIndex(null);
@@ -1341,6 +1348,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
         setGRunRedout(false);
         setGRunThump(false);
         setCompletedReports((count) => count + 1);
+        setSeconds((time) => Math.min(CLEAR_TIME_SECONDS, time + DAY_ONE_REPORT_TIME_BONUS_SECONDS));
       });
     } else {
       showOverlay("warning", "오보고 기록됨.", 1100, () => {
@@ -1531,42 +1539,45 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
           )}
         </main>
       ) : turnedBack ? (
-        <main className={`screen rear-screen noise${rearPanelClosing ? " is-closing" : ""}`}>
-          <div className="panel-label">REAR PANEL<br />FREQUENCY SYNC</div>
-          <section className="sync-panel">
-            <h1>주파수 재동기화</h1>
-            <p>목표 주파수와 현재 주파수를 맞추면 CCTV가 재부팅됩니다.</p>
-            <div className="range-labels"><span>0.00 MHz</span><span>100.00 MHz</span></div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={frequency}
-              onInput={(event) => setFrequencyFromInput(Number(event.target.value))}
-              onChange={(event) => setFrequencyFromInput(Number(event.target.value))}
-              className="frequency-range"
-            />
-            <div className="frequency-grid">
-              <span>현재: {frequency.toFixed(0)} MHz</span>
-              <span>목표: {targetFrequency.toFixed(0)} MHz</span>
-            </div>
-            <div className="scope">
-              <i className="scope-current" style={{ left: `${frequency}%` }} />
-              <i className="scope-target" style={{ left: `${targetFrequency}%` }} />
-            </div>
-            <button type="button" onPointerDown={press(tryReboot)} onClick={click(tryReboot)} className={`reboot-button ${isTuned(frequency, targetFrequency) ? "ready" : ""}`}>
-              <span>ENTER</span>
-              재부팅
+        <>
+          <MonitorFrame frame={1} staticBurst={false} />
+          <main className={`screen rear-screen noise${rearPanelClosing ? " is-closing" : ""}`}>
+            <div className="panel-label">REAR PANEL<br />FREQUENCY SYNC</div>
+            <section className="sync-panel">
+              <h1>주파수 재동기화</h1>
+              <p>목표 주파수와 현재 주파수를 맞추면 CCTV가 재부팅됩니다.</p>
+              <div className="range-labels"><span>0.00 MHz</span><span>100.00 MHz</span></div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={frequency}
+                onInput={(event) => setFrequencyFromInput(Number(event.target.value))}
+                onChange={(event) => setFrequencyFromInput(Number(event.target.value))}
+                className="frequency-range"
+              />
+              <div className="frequency-grid">
+                <span>현재: {frequency.toFixed(0)} MHz</span>
+                <span>목표: {targetFrequency.toFixed(0)} MHz</span>
+              </div>
+              <div className="scope">
+                <i className="scope-current" style={{ left: `${frequency}%` }} />
+                <i className="scope-target" style={{ left: `${targetFrequency}%` }} />
+              </div>
+              <button type="button" onPointerDown={press(tryReboot)} onClick={click(tryReboot)} className={`reboot-button ${isTuned(frequency, targetFrequency) ? "ready" : ""}`}>
+                <span>ENTER</span>
+                재부팅
+              </button>
+              <button type="button" onPointerDown={press(forceRebootFail)} onClick={click(forceRebootFail)} className="delay-button">
+                너무 오래 걸렸다면 강제 실패 처리
+              </button>
+            </section>
+            <button type="button" onPointerDown={press(closeRearPanel)} onClick={click(closeRearPanel)} className="control-button report-button">
+              <span>SHIFT</span>
+              돌아가기
             </button>
-            <button type="button" onPointerDown={press(forceRebootFail)} onClick={click(forceRebootFail)} className="delay-button">
-              너무 오래 걸렸다면 강제 실패 처리
-            </button>
-          </section>
-          <button type="button" onPointerDown={press(closeRearPanel)} onClick={click(closeRearPanel)} className="control-button report-button">
-            <span>SHIFT</span>
-            돌아가기
-          </button>
-        </main>
+          </main>
+        </>
       ) : (
         <MonitorFrame frame={1} staticBurst={staticBurst}>
           <button
@@ -1642,6 +1653,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const [rearView, setRearView] = useState(false);
   const [turning, setTurning] = useState(false);
   const [sedativeEffect, setSedativeEffect] = useState(false);
+  const [developerMode, setDeveloperMode] = useState(false);
 
   const panelTimer = useRef(null);
   const holdTimer = useRef(null);
@@ -1658,11 +1670,13 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const sedativeResetTimer = useRef(null);
   const clearTimer = useRef(null);
   const jumpTimer = useRef(null);
+  const panelExposureRef = useRef(0);
   const bgmRef = useRef(null);
   const soundRef = useRef(null);
   const jumpAudioRef = useRef(null);
   const controlAudioRef = useRef(null);
   const fixAudioRef = useRef(null);
+  const taskControlSoundAt = useRef(0);
   const evOnRef = useRef(null);
   const evRideRef = useRef(null);
   const evOffRef = useRef(null);
@@ -1750,11 +1764,34 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     if (!gameStarted || dead || cleared || phase === "clear") return undefined;
     const panelActive = taskPanelOpen || reportPanelOpen;
     const timer = setInterval(() => {
-      const increase = panelActive ? 7 : holdTask !== null || audioPlaying ? 5 : 2;
+      panelExposureRef.current = panelActive ? panelExposureRef.current + 1 : Math.max(0, panelExposureRef.current - 1.5);
+      const exposureBoost = panelActive ? Math.min(28, 3 * Math.pow(1.22, panelExposureRef.current / 3)) : 0;
+      const increase = panelActive ? exposureBoost : holdTask !== null || audioPlaying ? 4 : 1.6;
       setDanger((value) => {
         const nextDanger = Math.min(100, value + increase);
-        if (panelActive && !rearView && !specialArmed && !specialPending && !specialView && !specialTooLate) {
-          setVisibleStage(getDay2StageFromDanger(nextDanger));
+        const currentStage = getDay2StageFromDanger(value);
+        const nextStage = getDay2StageFromDanger(nextDanger);
+        if (
+          currentStage === 1 &&
+          nextStage === 2 &&
+          !specialArmed &&
+          !specialPending &&
+          !specialView &&
+          !specialTooLate &&
+          Math.random() < 0.1
+        ) {
+          setSpecialArmed(true);
+        }
+        if (
+          panelActive &&
+          (currentStage !== nextStage || visibleStage !== nextStage) &&
+          !rearView &&
+          !specialArmed &&
+          !specialPending &&
+          !specialView &&
+          !specialTooLate
+        ) {
+          setVisibleStage(nextStage);
         }
         return nextDanger;
       });
@@ -1775,17 +1812,13 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     specialView,
     specialTooLate,
     rearView,
+    visibleStage,
   ]);
 
   useEffect(() => {
     const nextStage = getDay2StageFromDanger(danger);
     if (nextStage !== stage) setStage(nextStage);
   }, [danger, stage]);
-
-  useEffect(() => {
-    if (!panelVisible || rearView || specialArmed || specialPending || specialView || specialTooLate) return;
-    setVisibleStage(stage);
-  }, [panelVisible, stage, rearView, specialArmed, specialPending, specialView, specialTooLate]);
 
   useEffect(() => {
     if (stage < 3 || deathArmed || dead || cleared) return undefined;
@@ -1844,18 +1877,40 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   useEffect(() => {
     if (holdTask === null) return undefined;
     const timer = setInterval(() => {
-      playDay2Control();
-      advanceTaskProgress(holdTask);
-    }, 1000);
+      const now = Date.now();
+      if (now - taskControlSoundAt.current >= 1000) {
+        taskControlSoundAt.current = now;
+        playDay2Control();
+      }
+      advanceTaskProgress(holdTask, 0.95);
+    }, 100);
     holdTimer.current = timer;
     return () => clearInterval(timer);
   }, [holdTask]);
 
   useEffect(() => {
+    if (holdTask !== null && taskProgress[holdTask] >= 100) {
+      setHoldTask(null);
+    }
+  }, [holdTask, taskProgress]);
+
+  useEffect(() => {
+    if (phase !== "tasks" || allTasksDone || activeTaskIndex < 0) return undefined;
+    if (holdTask !== null && taskPanelOpen && !taskPanelClosing) return undefined;
+
+    const timer = setInterval(() => {
+      setTaskProgress((items) =>
+        items.map((value, index) => (index === activeTaskIndex ? Math.max(0, value - 0.55) : value))
+      );
+    }, 200);
+
+    return () => clearInterval(timer);
+  }, [phase, allTasksDone, activeTaskIndex, holdTask, taskPanelOpen, taskPanelClosing]);
+
+  useEffect(() => {
     if (phase === "tasks" && allTasksDone) {
       setHoldTask(null);
-      closeTaskPanel();
-      setPhase("sound");
+      revealSpecialEvent();
     }
   }, [allTasksDone, phase]);
 
@@ -1913,7 +1968,6 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
       revealSpecialEvent();
       return;
     }
-    setVisibleStage(stage);
   }
 
   function revealSpecialEvent() {
@@ -1950,6 +2004,10 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     controlAudioRef.current.play().catch(() => {});
   }
 
+  function addDay2Danger(amount) {
+    setDanger((value) => Math.min(100, value + amount));
+  }
+
   function advanceTaskProgress(index, amount = 14) {
     setTaskProgress((items) => items.map((value, itemIndex) => (itemIndex === index ? Math.min(100, value + amount) : value)));
   }
@@ -1958,6 +2016,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     event.preventDefault();
     if (index !== activeTaskIndex || taskProgress[index] >= 100) return;
     playDay2Control();
+    taskControlSoundAt.current = Date.now();
     advanceTaskProgress(index, 10);
     setHoldTask(index);
   }
@@ -1965,18 +2024,21 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   function openTaskPanel() {
     if (phase !== "tasks" || taskPanelOpen || taskPanelClosing || dead || cleared) return;
     playFix();
+    addDay2Danger(2);
     setTaskPanelOpen(true);
   }
 
   function closeTaskPanel() {
     if (!taskPanelOpen || taskPanelClosing) return;
     playFix();
+    addDay2Danger(2);
     applyPanelReveal();
     setTaskPanelClosing(true);
     setHoldTask(null);
     panelTimer.current = setTimeout(() => {
       setTaskPanelOpen(false);
       setTaskPanelClosing(false);
+      if (allTasksDone) setPhase("sound");
     }, REAR_PANEL_CLOSE_DURATION);
   }
 
@@ -2023,8 +2085,11 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   function playSoundTest() {
     if (phase !== "sound" || audioPlaying || audioEnded || reportPanelOpen || audioStep >= DAY2_SOUND_TESTS.length) return;
     const audio = soundRef.current;
-    audio.src = DAY2_SOUND_TESTS[audioStep];
-    audio.currentTime = 0;
+    const nextSrc = DAY2_SOUND_TESTS[audioStep];
+    if (!audio.src.endsWith(nextSrc)) {
+      audio.src = nextSrc;
+      audio.currentTime = 0;
+    }
     audio.volume = 0.82;
     setAudioPlaying(true);
     setAudioEnded(false);
@@ -2042,12 +2107,14 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   function openReportPanel() {
     if (phase !== "sound" || reportPanelOpen || reportPanelClosing || audioStep >= DAY2_SOUND_TESTS.length) return;
     playFix();
+    addDay2Danger(2);
     setReportPanelOpen(true);
   }
 
   function closeReportPanel() {
     if (!reportPanelOpen || reportPanelClosing) return;
     playFix();
+    addDay2Danger(2);
     applyPanelReveal();
     setReportPanelClosing(true);
     panelTimer.current = setTimeout(() => {
@@ -2149,6 +2216,12 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
         return;
       }
 
+      if (event.key.toLowerCase() === "p" || event.code === "KeyP") {
+        event.preventDefault();
+        setDeveloperMode((enabled) => !enabled);
+        return;
+      }
+
       if (event.key.toLowerCase() === "l" || event.key === "ㅣ" || event.code === "KeyL") {
         event.preventDefault();
         revealSpecialEvent();
@@ -2185,7 +2258,8 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
           <img src={DAY2_IMAGES[stageImage]} alt="" className="day2-creature" draggable="false" />
           <div className="day2-hud">
             <strong>DAY 02</strong>
-            <span>이상행동 {stage}단계 / 진정제 {sedatives}</span>
+            <span>진정제 {sedatives}</span>
+            {developerMode && <span>DEV 이상행동 {stage}단계 / 게이지 {danger.toFixed(1)}</span>}
           </div>
 
           {phase === "tasks" && (

@@ -1173,6 +1173,10 @@ button {
   bottom: 24px;
 }
 
+.day2-turn {
+  bottom: 96px;
+}
+
 .day2-red-button {
   position: absolute;
   right: 20.4%;
@@ -1235,10 +1239,10 @@ button {
   position: absolute;
   left: clamp(56px, 9vw, 140px);
   right: clamp(56px, 9vw, 140px);
-  top: 22px;
+  top: 0;
   bottom: 0;
   z-index: 40;
-  height: calc(100vh - 22px);
+  height: 100vh;
   padding: clamp(1.1rem, 2.6vw, 2.1rem);
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-bottom: 0;
