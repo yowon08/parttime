@@ -162,6 +162,10 @@ function randomItem(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
 const PRELOADED_IMAGE_CACHE = new Map();
 
 function preloadImage(src) {
@@ -1633,7 +1637,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const [danger, setDanger] = useState(0);
   const [deathArmed, setDeathArmed] = useState(false);
   const [forceDeath, setForceDeath] = useState(false);
-  const [sedatives, setSedatives] = useState(10);
+  const [sedatives, setSedatives] = useState(8);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [taskPanelClosing, setTaskPanelClosing] = useState(false);
   const [taskProgress, setTaskProgress] = useState([0, 0, 0, 0]);
@@ -1765,8 +1769,10 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     const panelActive = taskPanelOpen || reportPanelOpen;
     const timer = setInterval(() => {
       panelExposureRef.current = panelActive ? panelExposureRef.current + 1 : Math.max(0, panelExposureRef.current - 1.5);
-      const exposureBoost = panelActive ? Math.min(28, 3 * Math.pow(1.22, panelExposureRef.current / 3)) : 0;
-      const increase = panelActive ? exposureBoost : holdTask !== null || audioPlaying ? 4 : 1.6;
+      const exposureMax = panelActive ? Math.min(30, 4 + 2.3 * Math.pow(1.18, panelExposureRef.current / 2.6)) : 0;
+      const minIncrease = audioPlaying ? 1.2 : 0.4;
+      const maxIncrease = panelActive ? exposureMax + (audioPlaying ? 4 : 0) : audioPlaying ? 7 : holdTask !== null ? 4.5 : 2.4;
+      const increase = randomBetween(minIncrease, maxIncrease);
       setDanger((value) => {
         const nextDanger = Math.min(100, value + increase);
         const currentStage = getDay2StageFromDanger(value);
@@ -1882,7 +1888,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
         taskControlSoundAt.current = now;
         playDay2Control();
       }
-      advanceTaskProgress(holdTask, 0.95);
+      advanceTaskProgress(holdTask, 0.72);
     }, 100);
     holdTimer.current = timer;
     return () => clearInterval(timer);
@@ -1900,7 +1906,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
 
     const timer = setInterval(() => {
       setTaskProgress((items) =>
-        items.map((value, index) => (index === activeTaskIndex ? Math.max(0, value - 0.55) : value))
+        items.map((value, index) => (index === activeTaskIndex ? Math.max(0, value - 0.9) : value))
       );
     }, 200);
 
