@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { INTRO_LINES } from "./introLines.js";
 import { DAY2_INTRO_LINES } from "./day2IntroLines.js";
+import { DAY3_TEXT } from "./day3Text.js";
 import "./styles.css";
 
 const CCTV_FRAMES = Array.from({ length: 12 }, (_, index) => `/cctv/frame_${String(index + 1).padStart(2, "0")}.png`);
@@ -21,30 +22,62 @@ const AUDIO = {
   noise: "/songs/noise.mp3",
   run: "/songs/run.mp3",
 };
-const BGM_VOLUME = 0.28;
-const VHS_VOLUME = 0.24;
-const SIGNAL_NOISE_VOLUME = 0.08;
-const CLEAR_TIME_SECONDS = 480;
-const CLEAR_TIME_MINUTES = 360;
-const DAY_ONE_REPORT_TIME_BONUS_SECONDS = 20;
-const LINGER_AMBUSH_DELAY = 8000;
-const REBOOT_CHECK_INTERVAL = 8000;
-const INTRO_LINE_DURATION = 3000;
-const INTRO_DIALOGUE_DELAY = 3000;
-const INTRO_SKIP_ARRIVAL_DELAY = 2000;
-const REAR_PANEL_CLOSE_DURATION = 520;
-const G_RUN_CLEAR_DELAY = 3000;
-const G_RUN_FINAL_GRACE = 450;
-const G_RUN_FRAME_DURATION = 145;
+const CONFIG = {
+  BGM_VOLUME: 0.28,
+  VHS_VOLUME: 0.24,
+  SIGNAL_NOISE_VOLUME: 0.08,
+  CLEAR_TIME_SECONDS: 480,
+  CLEAR_TIME_MINUTES: 360,
+  DAY_ONE_REPORT_TIME_BONUS_SECONDS: 20,
+  LINGER_AMBUSH_DELAY: 8000,
+  REBOOT_CHECK_INTERVAL: 8000,
+  INTRO_LINE_DURATION: 3000,
+  INTRO_DIALOGUE_DELAY: 3000,
+  INTRO_SKIP_ARRIVAL_DELAY: 2000,
+  REAR_PANEL_CLOSE_DURATION: 520,
+  G_RUN_CLEAR_DELAY: 3000,
+  G_RUN_FINAL_GRACE: 450,
+  G_RUN_FRAME_DURATION: 145,
+  FADE_DURATION_DEFAULT: 500,
+};
+const BGM_VOLUME = CONFIG.BGM_VOLUME;
+const VHS_VOLUME = CONFIG.VHS_VOLUME;
+const SIGNAL_NOISE_VOLUME = CONFIG.SIGNAL_NOISE_VOLUME;
+const CLEAR_TIME_SECONDS = CONFIG.CLEAR_TIME_SECONDS;
+const CLEAR_TIME_MINUTES = CONFIG.CLEAR_TIME_MINUTES;
+const DAY_ONE_REPORT_TIME_BONUS_SECONDS = CONFIG.DAY_ONE_REPORT_TIME_BONUS_SECONDS;
+const LINGER_AMBUSH_DELAY = CONFIG.LINGER_AMBUSH_DELAY;
+const REBOOT_CHECK_INTERVAL = CONFIG.REBOOT_CHECK_INTERVAL;
+const INTRO_LINE_DURATION = CONFIG.INTRO_LINE_DURATION;
+const INTRO_DIALOGUE_DELAY = CONFIG.INTRO_DIALOGUE_DELAY;
+const INTRO_SKIP_ARRIVAL_DELAY = CONFIG.INTRO_SKIP_ARRIVAL_DELAY;
+const REAR_PANEL_CLOSE_DURATION = CONFIG.REAR_PANEL_CLOSE_DURATION;
+const G_RUN_CLEAR_DELAY = CONFIG.G_RUN_CLEAR_DELAY;
+const G_RUN_FINAL_GRACE = CONFIG.G_RUN_FINAL_GRACE;
+const G_RUN_FRAME_DURATION = CONFIG.G_RUN_FRAME_DURATION;
 const INTRO_PAUSE_TOKEN = "dlay";
 const ELEVATOR_IMAGE = "/ev/ev.png";
 const INTRO_VOICE_FILES = Array.from({ length: 17 }, (_, index) => `/voice/${index + 1}.mp3`);
 const AMBIENT_SFX_FILES = Object.values(
   import.meta.glob("/public/sfx/*.{mp3,wav,ogg}", { eager: true, query: "?url", import: "default" })
 );
-const DAY_COUNT = 2;
-const IMPLEMENTED_DAYS = 2;
-const DEFAULT_UNLOCKED_DAY = 2;
+const DAY3_INF_SOUNDS = Object.values(
+  import.meta.glob("/public/songs/inf-*.{mp3,wav,ogg}", { eager: true, query: "?url", import: "default" })
+);
+const DAY3_LONG_SOUNDS = Object.values(
+  import.meta.glob("/public/songs/long-*.{mp3,wav,ogg}", { eager: true, query: "?url", import: "default" })
+);
+const DAY3_JUMP_FRAMES = Object.values(
+  import.meta.glob("/public/repair/jump/*.{png,jpg,jpeg,webp}", { eager: true, query: "?url", import: "default" })
+).sort((a, b) => {
+  const aNumber = Number(String(a).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? 0);
+  const bNumber = Number(String(b).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? 0);
+  return aNumber - bNumber;
+});
+const DAY3_AD_IMAGES = Array.from({ length: 4 }, (_, index) => `/ad/${index + 1}.png`);
+const DAY_COUNT = 3;
+const IMPLEMENTED_DAYS = 3;
+const DEFAULT_UNLOCKED_DAY = 3;
 const SAVE_KEY = "analog-observation-unlocked-day";
 const DAY2_IMAGES = {
   1: "/sal/1.png",
@@ -164,6 +197,10 @@ function randomItem(list) {
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 const PRELOADED_IMAGE_CACHE = new Map();
@@ -353,6 +390,90 @@ function ElevatorIntro({ ready, progress, line, onEnter, onSkip, exiting }) {
   );
 }
 
+function useGameAudio() {
+  const introAudioContextRef = useRef(null);
+  const introVoiceNodesRef = useRef(null);
+  const fadeTimers = useRef(new Map());
+
+  const fadeAudio = useCallback((audio, targetVolume, duration = CONFIG.FADE_DURATION_DEFAULT, options = {}) => {
+    if (!audio) return;
+
+    clearInterval(fadeTimers.current.get(audio));
+    if (options.playBefore) audio.play().catch(() => {});
+
+    const startVolume = audio.volume;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      audio.volume = startVolume + (targetVolume - startVolume) * progress;
+      if (progress < 1) return;
+
+      clearInterval(timer);
+      fadeTimers.current.delete(audio);
+      audio.volume = targetVolume;
+      if (options.pauseAfter) audio.pause();
+    }, 30);
+
+    fadeTimers.current.set(audio, timer);
+  }, []);
+
+  const disconnectIntroVoiceEffect = useCallback(() => {
+    const nodes = introVoiceNodesRef.current;
+    if (!nodes) return;
+
+    nodes.forEach((node) => {
+      try {
+        node.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    });
+    introVoiceNodesRef.current = null;
+  }, []);
+
+  const applyIntroVoiceEffect = useCallback((audio) => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const context = introAudioContextRef.current ?? new AudioContext();
+    introAudioContextRef.current = context;
+    context.resume().catch(() => {});
+
+    disconnectIntroVoiceEffect();
+
+    const source = context.createMediaElementSource(audio);
+    const highpass = context.createBiquadFilter();
+    const lowpass = context.createBiquadFilter();
+    const dry = context.createGain();
+    const wet = context.createGain();
+    const delay = context.createDelay(0.35);
+    const feedback = context.createGain();
+
+    highpass.type = "highpass";
+    highpass.frequency.value = 180;
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 3600;
+    dry.gain.value = 0.86;
+    wet.gain.value = 0.12;
+    delay.delayTime.value = 0.115;
+    feedback.gain.value = 0.18;
+
+    source.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(dry);
+    dry.connect(context.destination);
+    lowpass.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(wet);
+    wet.connect(context.destination);
+
+    introVoiceNodesRef.current = [source, highpass, lowpass, dry, wet, delay, feedback];
+  }, [disconnectIntroVoiceEffect]);
+
+  return { fadeTimers, fadeAudio, applyIntroVoiceEffect, disconnectIntroVoiceEffect };
+}
+
 function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const [gameStarted, setGameStarted] = useState(false);
   const [introReady, setIntroReady] = useState(false);
@@ -398,8 +519,6 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const rearPanelTimer = useRef(null);
   const introDialogueTimer = useRef(null);
   const introVoiceRef = useRef(null);
-  const introAudioContextRef = useRef(null);
-  const introVoiceNodesRef = useRef(null);
   const ambientSfxTimer = useRef(null);
   const ambientSfxAudio = useRef(null);
   const lastAmbientSfx = useRef(null);
@@ -425,10 +544,10 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const runRef = useRef(null);
   const gRunThumpTimer = useRef(null);
   const gameStageRef = useRef(null);
-  const fadeTimers = useRef(new Map());
   const ignoreClickUntil = useRef(0);
   const lastControlSoundAt = useRef(0);
   const cameraStressRef = useRef(0);
+  const { fadeTimers, fadeAudio, applyIntroVoiceEffect, disconnectIntroVoiceEffect } = useGameAudio();
   const tests = useMemo(() => runTests(), []);
   const currentCam = CAMERAS[camIndex];
   const currentHasAnomaly = anomalyCam === camIndex;
@@ -837,89 +956,90 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
     }
   }, [warnings, dead]);
 
+  // DayOneGame 내부에 최신 상태를 담아두는 ref 추가
+  const gameStateRef = useRef({
+    turnedBack, rearPanelClosing, cctvOpen, frequency, camIndex
+  });
+  const dayOneActionsRef = useRef({});
+
+  // 렌더링될 때마다 최신 상태를 ref에 동기화
+  useEffect(() => {
+    gameStateRef.current = { turnedBack, rearPanelClosing, cctvOpen, frequency, camIndex };
+  }, [turnedBack, rearPanelClosing, cctvOpen, frequency, camIndex]);
+
+  useEffect(() => {
+    dayOneActionsRef.current = {
+      adjustFrequency,
+      changeCam,
+      closeRearPanel,
+      lowerMonitor,
+      openRearPanel,
+      primeAudio,
+      raiseMonitor,
+      reportProblem,
+      triggerCurrentCameraSpecialEvent,
+      tryReboot,
+    };
+  });
+
+  // 키보드 이벤트 최적화
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!gameStarted || overlay || dead || cleared || monitorMotion) return;
 
+      const state = gameStateRef.current; // 항상 최신 상태를 참조
       const key = event.key.toLowerCase();
 
-      if (event.repeat && !(turnedBack && !rearPanelClosing && (key === "a" || key === "d"))) return;
+      // 반복 입력 무시 (뒤돌아 있는 상태에서의 A/D 키 제외)
+      if (event.repeat && !(state.turnedBack && !state.rearPanelClosing && (key === "a" || key === "d"))) return;
 
       if (key === " " || key === "spacebar") {
         event.preventDefault();
-        primeAudio();
-        if (cctvOpen && !turnedBack) {
-          lowerMonitor();
-        } else if (!cctvOpen && !turnedBack) {
-          raiseMonitor();
-        }
+        dayOneActionsRef.current.primeAudio?.();
+        if (state.cctvOpen && !state.turnedBack) dayOneActionsRef.current.lowerMonitor?.();
+        else if (!state.cctvOpen && !state.turnedBack) dayOneActionsRef.current.raiseMonitor?.();
         return;
       }
 
       if (key === "enter") {
         event.preventDefault();
-        primeAudio();
-        if (turnedBack && !rearPanelClosing) {
-          tryReboot();
-        } else {
-          reportProblem();
-        }
+        dayOneActionsRef.current.primeAudio?.();
+        if (state.turnedBack && !state.rearPanelClosing) dayOneActionsRef.current.tryReboot?.();
+        else dayOneActionsRef.current.reportProblem?.();
         return;
       }
 
       if (key === "shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {
         event.preventDefault();
-        if (!cctvOpen && !turnedBack) openRearPanel();
-        else if (turnedBack && !rearPanelClosing) closeRearPanel();
+        if (!state.cctvOpen && !state.turnedBack) dayOneActionsRef.current.openRearPanel?.();
+        else if (state.turnedBack && !state.rearPanelClosing) dayOneActionsRef.current.closeRearPanel?.();
         return;
       }
 
       if (key === "a") {
         event.preventDefault();
-        if (turnedBack && !rearPanelClosing) {
-          adjustFrequency(-1);
-        } else {
-          changeCam(-1);
-        }
+        if (state.turnedBack && !state.rearPanelClosing) dayOneActionsRef.current.adjustFrequency?.(-1);
+        else dayOneActionsRef.current.changeCam?.(-1);
         return;
       }
 
       if (key === "d") {
         event.preventDefault();
-        if (turnedBack && !rearPanelClosing) {
-          adjustFrequency(1);
-        } else {
-          changeCam(1);
-        }
+        if (state.turnedBack && !state.rearPanelClosing) dayOneActionsRef.current.adjustFrequency?.(1);
+        else dayOneActionsRef.current.changeCam?.(1);
         return;
       }
 
       if (key === "l" || key === "ㅣ" || event.code === "KeyL") {
         event.preventDefault();
-        triggerCurrentCameraSpecialEvent();
+        dayOneActionsRef.current.triggerCurrentCameraSpecialEvent?.();
       }
     };
 
+    // 의존성 배열을 대폭 줄여 불필요한 이벤트 재등록 방지
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [
-    gameStarted,
-    overlay,
-    dead,
-    cleared,
-    monitorMotion,
-    cctvOpen,
-    turnedBack,
-    rearPanelClosing,
-    frequency,
-    rebootRequired,
-    signalFailure,
-    currentHasAnomaly,
-    camIndex,
-    currentCam,
-    anomalyCam,
-    anomalyVariant,
-  ]);
+  }, [gameStarted, overlay, dead, cleared, monitorMotion]);
 
   useEffect(() => {
     if (!gameStarted) return;
@@ -1039,28 +1159,6 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
     bgm.play().catch(() => {});
   }
 
-  function fadeAudio(audio, targetVolume, duration = 500, options = {}) {
-    if (!audio) return;
-
-    clearInterval(fadeTimers.current.get(audio));
-    if (options.playBefore) audio.play().catch(() => {});
-
-    const startVolume = audio.volume;
-    const startedAt = Date.now();
-    const timer = setInterval(() => {
-      const progress = Math.min(1, (Date.now() - startedAt) / duration);
-      audio.volume = startVolume + (targetVolume - startVolume) * progress;
-      if (progress < 1) return;
-
-      clearInterval(timer);
-      fadeTimers.current.delete(audio);
-      audio.volume = targetVolume;
-      if (options.pauseAfter) audio.pause();
-    }, 30);
-
-    fadeTimers.current.set(audio, timer);
-  }
-
   function playOnSound() {
     const audio = onRef.current;
     if (!audio) return;
@@ -1092,60 +1190,6 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
       setGRunThump(true);
       gRunThumpTimer.current = setTimeout(() => setGRunThump(false), 130);
     });
-  }
-
-  function disconnectIntroVoiceEffect() {
-    const nodes = introVoiceNodesRef.current;
-    if (!nodes) return;
-
-    nodes.forEach((node) => {
-      try {
-        node.disconnect();
-      } catch {
-        // Already disconnected.
-      }
-    });
-    introVoiceNodesRef.current = null;
-  }
-
-  function applyIntroVoiceEffect(audio) {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-
-    const context = introAudioContextRef.current ?? new AudioContext();
-    introAudioContextRef.current = context;
-    context.resume().catch(() => {});
-
-    disconnectIntroVoiceEffect();
-
-    const source = context.createMediaElementSource(audio);
-    const highpass = context.createBiquadFilter();
-    const lowpass = context.createBiquadFilter();
-    const dry = context.createGain();
-    const wet = context.createGain();
-    const delay = context.createDelay(0.35);
-    const feedback = context.createGain();
-
-    highpass.type = "highpass";
-    highpass.frequency.value = 180;
-    lowpass.type = "lowpass";
-    lowpass.frequency.value = 3600;
-    dry.gain.value = 0.86;
-    wet.gain.value = 0.12;
-    delay.delayTime.value = 0.115;
-    feedback.gain.value = 0.18;
-
-    source.connect(highpass);
-    highpass.connect(lowpass);
-    lowpass.connect(dry);
-    dry.connect(context.destination);
-    lowpass.connect(delay);
-    delay.connect(feedback);
-    feedback.connect(delay);
-    delay.connect(wet);
-    wet.connect(context.destination);
-
-    introVoiceNodesRef.current = [source, highpass, lowpass, dry, wet, delay, feedback];
   }
 
   function playControlSound() {
@@ -2023,7 +2067,6 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     if (index !== activeTaskIndex || taskProgress[index] >= 100) return;
     playDay2Control();
     taskControlSoundAt.current = Date.now();
-    advanceTaskProgress(index, 10);
     setHoldTask(index);
   }
 
@@ -2367,6 +2410,1299 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   );
 }
 
+const DAY3_ASSETS = {
+  mainImage: "/repair/main.png",
+  bgm: "/songs/day3bgm.mp3",
+  repairLoop: "/songs/repair.mp3",
+  light: "/songs/light.mp3",
+  ad: "/songs/ad.mp3",
+  jump: "/songs/day3jump.mp3",
+  panic: "/songs/panic.mp3",
+  turnoff: "/songs/turnoff.mp3",
+  panel: AUDIO.fix,
+};
+
+const DAY3_AUDIO_VOLUME = {
+  bgm: 0.055,
+  repair: 0.34,
+  ad: 0.34,
+  light: 0.38,
+  closeLoop: 0.16,
+  monsterMoveBase: 0.025,
+  monsterMoveStep: 0.055,
+  monsterRetreatBase: 0.08,
+  jump: 0.72,
+  panicMax: 0.58,
+};
+
+const DAY3_STAGE_NAMES = [
+  "보조 전원 연결",
+  "차단기 안정화",
+  "보조 회로 확인",
+  "전력 동기화",
+  "격리벽 잠금 장치 재가동",
+  "인지 차폐 장치 복구",
+  "폐쇄 신호 검증",
+  "비상 재동기화",
+];
+
+const DAY3_INTRO_LINES = [
+  "제3격리벽 하부 정비구역으로 이동합니다.",
+  "정비 담당자님께 사전 안전 절차를 안내드립니다.",
+  "해당 구역은 청각 반응성 개체 및 인지 간섭 개체의 영향권에 포함되어 있습니다.",
+  "비상 상황 발생 시, 불필요한 음성 응답 및 소음 발생을 삼가십시오.",
+  "구조반은 정비 담당자의 위치 정보를 사전에 공유받고 있으며, 음성 신호를 통해 생존자를 탐색하지 않습니다.",
+  "시설 방송이 본 안내와 상충되는 지시를 내릴 경우, 본 안내를 우선하십시오.",
+  "반복합니다.",
+  "비상 상황 발생 시, 소리를 내지 마십시오.",
+  "그들이 먼저 듣습니다.",
+];
+
+const DAY3_TUTORIAL_LINES = [
+  "정비 담당자님, 중앙 제어 패널에 도착하셨습니다.",
+  "금일 작업은 제3격리벽 전력 공급 장치의 수동 점검입니다.",
+  "작업은 총 8단계로 구성되어 있으며, 각 단계 완료 후 다음 절차가 자동으로 개방됩니다.",
+  "완료된 절차는 안전 기록에 저장되며, 이전 단계로 되돌아가지 않습니다.",
+  "안내드립니다.",
+  "당사는 협력 기업들과의 원만한 관계 유지 및 시설 운영 비용 절감을 위해 정비 인터페이스 내 사내 광고 송출 제도를 도입하였습니다.",
+];
+
+const DAY3_RADIO_LINES = [
+  "정비 담당자님, 1단계 절차가 정상적으로 완료되었습니다.",
+  "이제 좌우 보조 통로의 전력 흐름을 확인하겠습니다.",
+  "현장 감독관 연결 중...",
+  "감독관님, 응답 바랍니다.",
+  "감독관님?",
+  "현재 위치를 확인해 주십시오.",
+  "잠시만요.",
+  "그쪽 출입문은 폐쇄되어 있어야—",
+];
+
+const DAY3_BLACKOUT_LINES = [
+  "경고.",
+  "주 전력 상실.",
+  "비상 조명 전환 실패.",
+  "제3격리벽 잠금 상태 확인 불가.",
+  "마물 격리벽 해제됨.",
+  "정비 담당자는 현재 위치를 이탈하지 마십시오.",
+  "수동 복구 절차를 계속 진행하십시오.",
+];
+
+const DAY3_AD_LINES = [
+  [
+    "TTF 산업은 격리시설 정비 인력의 안전한 근무 환경을 위해 최신 인지 안정 기술과 현장 지원 체계를 제공합니다.",
+    "통제는 안전을 낳고, 안전은 내일을 지킵니다.",
+  ],
+  [
+    "TTF-115.",
+    "현장 인력의 인지 안정성을 위한 검증된 선택.",
+    "호흡 곤란, 방향감 상실, 확인되지 않은 음성 인식이 발생할 경우 관리자의 지시에 따라 투여하십시오.",
+    "들리는 모든 것이 진실은 아닙니다.",
+  ],
+  [
+    "퇴실 전 소독 절차는 선택이 아닙니다.",
+    "당신의 피부, 호흡, 기억에 남은 잔여 오염을 표준 절차로 관리하십시오.",
+    "깨끗한 복귀가 완전한 복귀입니다.",
+  ],
+  [
+    "TTF 산업은 귀하의 생존과 복귀를 진심으로 환영합니다.",
+    "정비 담당자의 헌신은 시설의 안정에 기여합니다.",
+    "시설의 안정은 복귀를 가능하게 합니다.",
+    "복귀는 새로운 통제를 가능하게 합니다.",
+    "귀하의 생존과 복귀를 진심으로 환영합니다.",
+  ],
+];
+
+const DAY3_ENDING_LINES = [
+  "수고하셨습니다.",
+  "당신의 헌신 덕분에 우리는 다시 통제와 안정을 되찾을 수 있게 되었습니다.",
+  "귀하의 생존과 복귀를 진심으로 환영합니다.",
+  "해당 개체는 적색지대에서 처음 관측되었습니다.",
+  "다른 것들을 흉내내고 모방하며, 인간의 정신을 침식할 수 있습니다.",
+  "그것은 지성을 지니고 있으며—",
+  "때론 아주 교활하게 인간을 덫으로 몰아넣기도 하죠.",
+  "우리는 그것을 변이체-C311이라고 명명했습니다.",
+  "귀하의 생존과 복귀를 진심으로 환영합니다.",
+];
+
+const DAY3_BALANCE = {
+  repairPerSecond: 9,
+  finalRepairPerSecond: 6.5,
+  repairGrace: 4,
+  finalRepairGrace: 2,
+  decayPerSecond: 2,
+  finalDecayPerSecond: 3,
+  repairContaminationChange: -2,
+  flashlightDrainPerSecond: 10,
+  flashlightRecoverPerSecond: 10,
+  flashlightRepelSeconds: 0.65,
+  monsterStepSeconds: 5.4,
+  repairMonsterBonus: 2,
+  attackTimerMin: 10,
+  attackTimerMax: 15,
+  attackWaitSeconds: 20,
+  attackPressureMultiplier: 2,
+  attackRollSeconds: 1,
+  attackRollChance: 0.33,
+  flashlightPanicDashChance: 0.7,
+  adReturnChanceMin: 0.08,
+  adReturnChanceMax: 0.36,
+  adReturnChanceStep: 0.055,
+};
+
+const DAY3_MONSTER_GRAPH = {
+  M: ["a1", "b1"],
+  a1: ["M", "a2"],
+  a2: ["a1", "a3"],
+  a3: ["a2"],
+  b1: ["M", "b2"],
+  b2: ["b1", "b3"],
+  b3: ["b2"],
+};
+
+function getDay3MonsterSide(position) {
+  if (position.startsWith("a")) return "left";
+  if (position.startsWith("b")) return "right";
+  return "center";
+}
+
+function getDay3MonsterLevel(position) {
+  if (position === "a1" || position === "b1") return 1;
+  if (position === "a2" || position === "b2") return 2;
+  if (position === "a3" || position === "b3") return 4;
+  return 0;
+}
+
+function getDay3MonsterLevels(position) {
+  const side = getDay3MonsterSide(position);
+  const level = getDay3MonsterLevel(position);
+  return {
+    left: side === "left" ? level : 0,
+    right: side === "right" ? level : 0,
+  };
+}
+
+function getDay3OppositeDashPath(position) {
+  if (position === "a3") return ["a2", "a1", "M", "b1", "b2", "b3"];
+  if (position === "b3") return ["b2", "b1", "M", "a1", "a2", "a3"];
+  return null;
+}
+
+function getDay3FlashlightPanicDashPath(position) {
+  if (position === "a1") return ["M", "b1", "b2", "b3"];
+  if (position === "a2") return ["a1", "M", "b1", "b2", "b3"];
+  if (position === "b1") return ["M", "a1", "a2", "a3"];
+  if (position === "b2") return ["b1", "M", "a1", "a2", "a3"];
+  return null;
+}
+
+function getDay3NaturalMoveOptions(position) {
+  if (position === "a3" || position === "b3") return [];
+  return DAY3_MONSTER_GRAPH[position] ?? ["M"];
+}
+
+  function DayThreeGame({ onReturnToMenu, onCompleteDay }) {
+  // 기존 상태들 (예: gameStarted, seconds 등) 유지...
+  
+  // [수정 1] 플레이어 시야 상태 (-1: 좌, 0: 중앙, 1: 우)
+  const [panX, setPanX] = useState(0); 
+  
+  // [수정 2] 괴물 위치 단계 (예: 0: 초기, 1: a1, 2: a2, 3: 근접)
+  const [monsterStage, setMonsterStage] = useState(0); 
+
+  // 오디오 및 타이머 Ref
+  const monsterAudioRef = useRef(null);
+  const { fadeAudio } = useGameAudio(); // 만들어두신 오디오 훅 사용
+
+  // 컴포넌트 마운트 시 괴물 소리 객체 할당
+  useEffect(() => {
+    monsterAudioRef.current = new Audio("/songs/monster.mp3"); // 3일차 괴물 소리 파일 경로
+    return () => {
+      monsterAudioRef.current?.pause();
+    };
+  }, []);
+  const [resetSeed, setResetSeed] = useState(0);
+  const [phase, setPhase] = useState("introElevator");
+  const [scriptIndex, setScriptIndex] = useState(0);
+  const [day3IntroReady, setDay3IntroReady] = useState(false);
+  const [day3IntroExiting, setDay3IntroExiting] = useState(false);
+  const [day3GameFadingIn, setDay3GameFadingIn] = useState(false);
+  const [view, setView] = useState("center");
+  const [stageIndex, setStageIndex] = useState(0);
+  const [stageProgress, setStageProgress] = useState(0);
+  const [completedStages, setCompletedStages] = useState(() => Array(8).fill(false));
+  const [contamination, setContamination] = useState(8);
+  const [flashlightStability, setFlashlightStability] = useState(100);
+  const [monsterPosition, setMonsterPosition] = useState("M");
+  const [monsters, setMonsters] = useState({ left: 0, right: 0 });
+  const [attackTimers, setAttackTimers] = useState({ left: null, right: null });
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [isFlashlightHeld, setIsFlashlightHeld] = useState(false);
+  const [flashPulse, setFlashPulse] = useState(null);
+  const [ad, setAd] = useState(null);
+  const [adCanSkip, setAdCanSkip] = useState(false);
+  const [hudVisible, setHudVisible] = useState(true);
+  const [message, setMessage] = useState("안내를 확인하십시오.");
+  const [gameover, setGameover] = useState(null);
+  const [endingStarted, setEndingStarted] = useState(false);
+  const [jumpIndex, setJumpIndex] = useState(null);
+  const repairIdleRef = useRef(0);
+  const monsterClockRef = useRef(0);
+  const finishingRef = useRef(false);
+  const adShownRef = useRef(new Set());
+  const usedAdImagesRef = useRef(new Set());
+  const bgmRef = useRef(null);
+  const repairAudioRef = useRef(null);
+  const closeLoopRef = useRef(null);
+  const adAudioRef = useRef(null);
+  const panicAudioRef = useRef(null);
+  const jumpAudioRef = useRef(null);
+  const evOnRef = useRef(null);
+  const evRideRef = useRef(null);
+  const evOffRef = useRef(null);
+  const day3AudioContextRef = useRef(null);
+  const flashlightRepelClockRef = useRef(0);
+  const monsterMovingRef = useRef(false);
+  const attackRollClockRef = useRef({ left: 0, right: 0 });
+  const adReturnChanceRef = useRef(DAY3_BALANCE.adReturnChanceMin);
+
+  function restartDay3() {
+    [bgmRef.current, repairAudioRef.current, closeLoopRef.current, adAudioRef.current, panicAudioRef.current, jumpAudioRef.current, evOnRef.current, evRideRef.current, evOffRef.current].forEach(stopDay3Audio);
+    bgmRef.current = null;
+    repairAudioRef.current = null;
+    closeLoopRef.current = null;
+    adAudioRef.current = null;
+    panicAudioRef.current = null;
+    jumpAudioRef.current = null;
+    evOnRef.current = null;
+    evRideRef.current = null;
+    evOffRef.current = null;
+    repairIdleRef.current = 0;
+    monsterClockRef.current = 0;
+    attackRollClockRef.current = { left: 0, right: 0 };
+    adReturnChanceRef.current = DAY3_BALANCE.adReturnChanceMin;
+    finishingRef.current = false;
+    adShownRef.current = new Set();
+    usedAdImagesRef.current = new Set();
+    flashlightRepelClockRef.current = 0;
+    monsterMovingRef.current = false;
+    setPhase("introElevator");
+    setScriptIndex(0);
+    setDay3IntroReady(false);
+    setDay3IntroExiting(false);
+    setDay3GameFadingIn(false);
+    setView("center");
+    setStageIndex(0);
+    setStageProgress(0);
+    setCompletedStages(Array(8).fill(false));
+    setContamination(8);
+    setFlashlightStability(100);
+    setMonsterPosition("M");
+    setMonsters({ left: 0, right: 0 });
+    setAttackTimers({ left: null, right: null });
+    setIsRepairing(false);
+    setIsFlashlightHeld(false);
+    setFlashPulse(null);
+    setAd(null);
+    setAdCanSkip(false);
+    setHudVisible(true);
+    setMessage("안내를 확인하십시오.");
+    setGameover(null);
+    setEndingStarted(false);
+    setJumpIndex(null);
+    setResetSeed((seed) => seed + 1);
+  }
+
+  const scriptLines = useMemo(() => {
+    if (phase === "introElevator") return DAY3_TEXT.intro;
+    if (phase === "tutorial") return DAY3_TEXT.tutorial.slice(0, 4);
+    if (phase === "adInfo") return DAY3_TEXT.tutorial.slice(4);
+    if (phase === "radioAttack") return DAY3_TEXT.radioAttack;
+    if (phase === "blackout") return DAY3_TEXT.blackout;
+    if (phase === "ending") return DAY3_TEXT.ending;
+    return [];
+  }, [phase]);
+
+  const darkMode = ["blackout", "playing", "ending", "gameover"].includes(phase);
+  const controlsLocked = Boolean(ad) || phase === "introElevator" || phase === "adInfo" || phase === "radioAttack" || phase === "blackout" || phase === "ending" || Boolean(gameover);
+  const canRepair = !controlsLocked && (phase === "tutorialRepair" || phase === "playing") && view === "center";
+  const canFlashlight = !controlsLocked && ["tutorial", "tutorialRepair", "playing"].includes(phase) && view !== "center" && flashlightStability > 0;
+
+  function playDay3Effect(src, volume = 0.45) {
+    if (!src) return null;
+    const audio = new Audio(src);
+    audio.volume = volume;
+    audio.play().catch(() => {});
+    return audio;
+  }
+
+  function stopDay3Audio(audio) {
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+  }
+
+  function ensureDay3ElevatorAudio() {
+    if (!evOnRef.current) evOnRef.current = new Audio(AUDIO.evOn);
+    if (!evRideRef.current) {
+      evRideRef.current = new Audio(AUDIO.evRide);
+      evRideRef.current.loop = true;
+    }
+    if (!evOffRef.current) evOffRef.current = new Audio(AUDIO.evOff);
+    evOnRef.current.volume = 0.55;
+    evRideRef.current.volume = 0.32;
+    evOffRef.current.volume = 0.58;
+  }
+
+  function playDay3PositionedEffect(src, volume, side) {
+    if (!src) return null;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return playDay3Effect(src, volume);
+
+    const context = day3AudioContextRef.current ?? new AudioContext();
+    day3AudioContextRef.current = context;
+    context.resume().catch(() => {});
+
+    const audio = new Audio(src);
+    const source = context.createMediaElementSource(audio);
+    const gain = context.createGain();
+    const pan = context.createStereoPanner ? context.createStereoPanner() : null;
+    gain.gain.value = volume;
+    audio.volume = 1;
+    source.connect(gain);
+    if (pan) {
+      pan.pan.value = side === "left" ? -0.72 : 0.72;
+      gain.connect(pan);
+      pan.connect(context.destination);
+    } else {
+      gain.connect(context.destination);
+    }
+    audio.addEventListener("ended", () => {
+      [source, gain, pan].filter(Boolean).forEach((node) => {
+        try {
+          node.disconnect();
+        } catch {
+          // Already disconnected.
+        }
+      });
+    }, { once: true });
+    audio.play().catch(() => {});
+    return audio;
+  }
+
+  function playMonsterMove(side, level, retreat = false) {
+    const src = randomItem(DAY3_LONG_SOUNDS);
+    const distanceVolume = retreat
+      ? DAY3_AUDIO_VOLUME.monsterRetreatBase + Math.max(0, level) * 0.035
+      : DAY3_AUDIO_VOLUME.monsterMoveBase + Math.max(0, level) * DAY3_AUDIO_VOLUME.monsterMoveStep;
+    playDay3PositionedEffect(src, clamp(distanceVolume, 0.04, 0.48), side);
+    setMessage(
+      side === "left"
+        ? retreat
+          ? "왼쪽의 젖은 발소리가 뒤로 밀려난다."
+          : "왼쪽 어둠 속에서 물이 눌리는 소리가 들린다."
+        : retreat
+          ? "오른쪽 금속 울림이 멀어진다."
+          : "오른쪽 벽 너머로 금속이 긁히는 소리가 들린다."
+    );
+  }
+
+  function applyMonsterPosition(position) {
+    setMonsterPosition(position);
+    setMonsters(getDay3MonsterLevels(position));
+  }
+
+  function moveMonsterAlong(path, interval = 170) {
+    if (!path?.length || monsterMovingRef.current) return;
+    monsterMovingRef.current = true;
+    path.forEach((position, index) => {
+      setTimeout(() => {
+        applyMonsterPosition(position);
+        const side = getDay3MonsterSide(position);
+        if (side !== "center") playMonsterMove(side, getDay3MonsterLevel(position), false);
+        if (index === path.length - 1) monsterMovingRef.current = false;
+      }, index * interval);
+    });
+  }
+
+  function moveMonsterRandomly() {
+    if (monsterMovingRef.current) return;
+    const path = [];
+    let cursor = monsterPosition;
+    const steps = Math.random() < 0.22 ? 2 : 1;
+    for (let index = 0; index < steps; index += 1) {
+      const options = getDay3NaturalMoveOptions(cursor);
+      if (!options.length) break;
+      const next = randomItem(options);
+      path.push(next);
+      cursor = next;
+    }
+    moveMonsterAlong(path, 185);
+  }
+
+  function repelMonsterWithFlashlight(side) {
+    const currentSide = getDay3MonsterSide(monsterPosition);
+    const level = getDay3MonsterLevel(monsterPosition);
+    if (currentSide !== side || level < 1 || monsterMovingRef.current) return;
+
+    const panicDashPath = level < 4 && Math.random() < DAY3_BALANCE.flashlightPanicDashChance
+      ? getDay3FlashlightPanicDashPath(monsterPosition)
+      : null;
+    if (panicDashPath) {
+      setAttackTimers({ left: null, right: null });
+      attackRollClockRef.current = { left: 0, right: 0 };
+      moveMonsterAlong(panicDashPath, 65);
+      return;
+    }
+
+    const dashPath = level >= 4 && Math.random() < 0.28 ? getDay3OppositeDashPath(monsterPosition) : null;
+    if (dashPath) {
+      setAttackTimers({ left: null, right: null });
+      attackRollClockRef.current = { left: 0, right: 0 };
+      moveMonsterAlong(dashPath, 70);
+      return;
+    }
+
+    const retreatPath = {
+      a3: ["a2"],
+      a2: ["a1"],
+      a1: ["M"],
+      b3: ["b2"],
+      b2: ["b1"],
+      b1: ["M"],
+    }[monsterPosition];
+    if (!retreatPath) return;
+    setAttackTimers((timers) => ({ ...timers, [side]: null }));
+    attackRollClockRef.current = { ...attackRollClockRef.current, [side]: 0 };
+    moveMonsterAlong(retreatPath, 150);
+  }
+
+  function stopCloseLoop() {
+    stopDay3Audio(closeLoopRef.current);
+    closeLoopRef.current = null;
+  }
+
+  function syncCloseLoop() {
+    const activeSide = view === "left" || view === "right" ? view : null;
+    if (!activeSide || monsters[activeSide] < 4 || isFlashlightHeld || phase !== "playing" || gameover) {
+      stopCloseLoop();
+      return;
+    }
+    if (closeLoopRef.current) return;
+    if (!DAY3_INF_SOUNDS.length) return;
+    const audio = new Audio(randomItem(DAY3_INF_SOUNDS));
+    audio.loop = true;
+    audio.volume = DAY3_AUDIO_VOLUME.closeLoop;
+    closeLoopRef.current = audio;
+    audio.play().catch(() => {});
+  }
+
+  function startAd(index, nextPhase = "playing") {
+    adShownRef.current.add(index);
+    adReturnChanceRef.current = DAY3_BALANCE.adReturnChanceMin;
+    const remainingAds = DAY3_AD_IMAGES.filter((image) => !usedAdImagesRef.current.has(image));
+    if (!remainingAds.length) {
+      setPhase(nextPhase);
+      setMessage("광고 송출 가능 항목 없음. 절차를 계속합니다.");
+      return;
+    }
+    const selectedAdImage = randomItem(remainingAds);
+    usedAdImagesRef.current.add(selectedAdImage);
+    setIsRepairing(false);
+    setIsFlashlightHeld(false);
+    setAdCanSkip(false);
+    stopDay3Audio(adAudioRef.current);
+    adAudioRef.current = playDay3Effect(DAY3_ASSETS.ad, DAY3_AUDIO_VOLUME.ad);
+    setAd({ index, line: 0, nextPhase, image: selectedAdImage });
+    setMessage("사내 광고 송출 중. 입력이 제한됩니다.");
+  }
+
+  function finishCurrentStage() {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    const finished = stageIndex;
+    setCompletedStages((items) => items.map((done, index) => (index === finished ? true : done)));
+    setStageProgress(0);
+    setIsRepairing(false);
+    repairIdleRef.current = 0;
+
+    setTimeout(() => {
+      finishingRef.current = false;
+      if (finished === 0 && phase === "tutorialRepair") {
+        setPhase("radioAttack");
+        setScriptIndex(0);
+        setMessage("현장 감독관 연결 중...");
+        return;
+      }
+
+      if (finished >= 7) {
+        setPhase("ending");
+        setScriptIndex(0);
+        setEndingStarted(true);
+        onCompleteDay();
+        return;
+      }
+
+      const nextStage = finished + 1;
+      setStageIndex(nextStage);
+      setMessage(`${nextStage + 1}단계 절차가 개방되었습니다.`);
+
+      if (nextStage === 7) {
+        setMessage("8단계 절차 변경. 비상 재동기화 모드로 전환합니다.");
+      }
+    }, 80);
+  }
+
+  function enterFacility() {
+    if (!day3IntroReady || day3IntroExiting) return;
+    setDay3IntroExiting(true);
+    evRideRef.current?.pause();
+    evOffRef.current?.pause();
+    setTimeout(() => {
+      setPhase("tutorial");
+      setScriptIndex(0);
+      setDay3GameFadingIn(true);
+      setMessage("중앙 제어 패널에 접근하십시오.");
+      setTimeout(() => setDay3GameFadingIn(false), 900);
+    }, 700);
+  }
+
+  function skipDay3Intro() {
+    setScriptIndex(DAY3_TEXT.intro.length - 1);
+    setDay3IntroReady(true);
+  }
+
+  function triggerDay3Blackout() {
+    playDay3Effect(DAY3_ASSETS.turnoff, 0.62);
+    setPhase("blackout");
+    setScriptIndex(0);
+    setMessage("주 전력 상실.");
+  }
+
+  function skipDay3Dialogue() {
+    if (phase === "introElevator") {
+      skipDay3Intro();
+      return;
+    }
+    if (phase === "tutorial") {
+      setPhase("tutorialRepair");
+      setScriptIndex(0);
+      setMessage("수리 절차를 시작하십시오.");
+      return;
+    }
+    if (phase === "adInfo") {
+      setPhase("tutorialRepair");
+      setScriptIndex(0);
+      setMessage("수리 절차를 계속 진행하십시오.");
+      return;
+    }
+    if (phase === "radioAttack") {
+      triggerDay3Blackout();
+      return;
+      setPhase("blackout");
+      setScriptIndex(0);
+      setMessage("주 전력 상실.");
+      return;
+    }
+    if (phase === "blackout") {
+      setPhase("playing");
+      setStageIndex(1);
+      setScriptIndex(0);
+      setMessage("수동 복구 절차를 계속 진행하십시오.");
+      return;
+    }
+    if (phase === "ending") {
+      setScriptIndex(DAY3_TEXT.ending.length - 1);
+    }
+  }
+
+  function beginTutorialRepair() {
+    setPhase("tutorialRepair");
+    setScriptIndex(0);
+  }
+
+  function closeDay3Ad() {
+    if (!ad || !adCanSkip) return;
+    const nextPhase = ad.nextPhase;
+    setAd(null);
+    setAdCanSkip(false);
+    setPhase(nextPhase);
+    setMessage("광고 송출 종료. 조작 권한이 복구되었습니다.");
+  }
+
+  function tryRandomReturnAd(previousView, nextView) {
+    if (phase !== "playing" || previousView === "center" || nextView !== "center" || ad || gameover) return;
+    const candidates = [1, 2, 3].filter((index) => !adShownRef.current.has(index));
+    if (!candidates.length) return;
+
+    if (Math.random() < adReturnChanceRef.current) {
+      startAd(randomItem(candidates), "playing");
+      return;
+    }
+
+    adReturnChanceRef.current = clamp(
+      adReturnChanceRef.current + DAY3_BALANCE.adReturnChanceStep,
+      DAY3_BALANCE.adReturnChanceMin,
+      DAY3_BALANCE.adReturnChanceMax
+    );
+  }
+
+  function moveView(nextView) {
+    if (controlsLocked) return;
+    const previousView = view;
+    if (nextView !== "center") setIsRepairing(false);
+    setView(nextView);
+    tryRandomReturnAd(previousView, nextView);
+  }
+
+  function toggleRepair() {
+    if (!canRepair) {
+      setIsRepairing(false);
+      return;
+    }
+    setIsRepairing((value) => !value);
+  }
+
+  function startFlashlight() {
+    if (!canFlashlight) {
+      if (phase === "playing" && view === "center") setMessage("손전등은 좌우 복도에서만 사용할 수 있습니다.");
+      return;
+    }
+    if (isFlashlightHeld) return;
+    playDay3Effect(DAY3_ASSETS.light, DAY3_AUDIO_VOLUME.light);
+    setIsFlashlightHeld(true);
+    setFlashPulse(view);
+  }
+
+  function stopFlashlight() {
+    if (!isFlashlightHeld) return;
+    playDay3Effect(DAY3_ASSETS.light, DAY3_AUDIO_VOLUME.light * 0.72);
+    setIsFlashlightHeld(false);
+    setFlashPulse(null);
+  }
+
+  function toggleFlashlight() {
+    if (isFlashlightHeld) {
+      stopFlashlight();
+      return;
+    }
+    startFlashlight();
+  }
+
+  function useFlashlight() {
+    if (!canFlashlight) {
+      if (phase === "playing" && view === "center") setMessage("손전등은 좌우 복도에서만 사용할 수 있습니다.");
+      return;
+    }
+    const side = view;
+    setFlashlightStability((value) => clamp(value - DAY3_BALANCE.flashlightCost, 0, 100));
+    setFlashPulse(side);
+    setTimeout(() => setFlashPulse(null), 260);
+
+    setMonsters((current) => {
+      const level = current[side];
+      if (level >= 2) {
+        setMessage(side === "left" ? "젖은 발소리가 멀어진다." : "금속 긁힘이 복도 끝으로 물러난다.");
+        setAttackTimers((timers) => ({ ...timers, [side]: null }));
+        return { ...current, [side]: level >= 4 ? 1 : 0 };
+      }
+      setMessage("빛이 빈 복도에 흩어진다.");
+      return current;
+    });
+  }
+
+  function triggerGameover(kind) {
+    setIsRepairing(false);
+    setIsFlashlightHeld(false);
+    stopCloseLoop();
+    stopDay3Audio(repairAudioRef.current);
+    stopDay3Audio(bgmRef.current);
+    stopDay3Audio(adAudioRef.current);
+    stopDay3Audio(panicAudioRef.current);
+    repairAudioRef.current = null;
+    bgmRef.current = null;
+    adAudioRef.current = null;
+    panicAudioRef.current = null;
+    setGameover(kind);
+    setPhase("gameover");
+    setJumpIndex(0);
+    jumpAudioRef.current = playDay3Effect(DAY3_ASSETS.jump, DAY3_AUDIO_VOLUME.jump);
+  }
+
+  function handleMouseMove(event) {
+    if (controlsLocked) return;
+    const ratio = event.clientX / window.innerWidth;
+    if (ratio < 0.18) moveView("left");
+    else if (ratio > 0.82) moveView("right");
+    else if (ratio > 0.38 && ratio < 0.62) moveView("center");
+  }
+
+  function isSceneFlashlightTarget(event) {
+    if (event.target.closest("button, .day3-panel, .day3-ad, .day3-left-hud, .day3-right-hud, .day3-message")) return;
+    return view === "left" || view === "right";
+  }
+
+  function handleScenePointerDown(event) {
+    if (!isSceneFlashlightTarget(event)) return;
+    startFlashlight();
+  }
+
+  function handleScenePointerUp(event) {
+    if (!isFlashlightHeld) return;
+    stopFlashlight();
+  }
+
+  useEffect(() => {
+    if (phase !== "introElevator") return undefined;
+    ensureDay3ElevatorAudio();
+    evOnRef.current.currentTime = 0;
+    evRideRef.current.currentTime = 0;
+    evOnRef.current.play().catch(() => {});
+    evRideRef.current.play().catch(() => {});
+
+    return () => {
+      stopDay3Audio(evOnRef.current);
+      stopDay3Audio(evRideRef.current);
+      stopDay3Audio(evOffRef.current);
+    };
+  }, [resetSeed]);
+
+  useEffect(() => {
+    if (!day3IntroReady) return;
+    ensureDay3ElevatorAudio();
+    evRideRef.current?.pause();
+    evOffRef.current.currentTime = 0;
+    evOffRef.current.play().catch(() => {});
+  }, [day3IntroReady]);
+
+  useEffect(() => {
+    const shouldPlay = phase !== "introElevator" && phase !== "gameover" && !gameover;
+    if (shouldPlay && !bgmRef.current) {
+      const audio = new Audio(DAY3_ASSETS.bgm);
+      audio.loop = true;
+      audio.volume = DAY3_AUDIO_VOLUME.bgm;
+      bgmRef.current = audio;
+      audio.play().catch(() => {});
+    }
+    if (!shouldPlay && bgmRef.current) {
+      stopDay3Audio(bgmRef.current);
+      bgmRef.current = null;
+    }
+    return () => {
+      stopDay3Audio(bgmRef.current);
+      bgmRef.current = null;
+    };
+  }, [phase, gameover]);
+
+  useEffect(() => {
+    return () => {
+      [bgmRef.current, repairAudioRef.current, closeLoopRef.current, adAudioRef.current, jumpAudioRef.current, evOnRef.current, evRideRef.current, evOffRef.current].forEach(stopDay3Audio);
+    };
+  }, []);
+
+  useEffect(() => {
+    const shouldRepair = isRepairing && canRepair && !ad && !gameover;
+    if (shouldRepair && !repairAudioRef.current) {
+      const audio = new Audio(DAY3_ASSETS.repairLoop);
+      audio.loop = true;
+      audio.volume = DAY3_AUDIO_VOLUME.repair;
+      repairAudioRef.current = audio;
+      audio.play().catch(() => {});
+    }
+    if (!shouldRepair && repairAudioRef.current) {
+      stopDay3Audio(repairAudioRef.current);
+      repairAudioRef.current = null;
+    }
+    return () => {
+      stopDay3Audio(repairAudioRef.current);
+      repairAudioRef.current = null;
+    };
+  }, [ad, canRepair, gameover, isRepairing]);
+
+  useEffect(() => {
+    if (isRepairing && !canRepair) setIsRepairing(false);
+  }, [canRepair, isRepairing]);
+
+  useEffect(() => {
+    if (isFlashlightHeld && !canFlashlight) setIsFlashlightHeld(false);
+  }, [canFlashlight, isFlashlightHeld]);
+
+  useEffect(() => {
+    syncCloseLoop();
+    return () => stopCloseLoop();
+  }, [gameover, isFlashlightHeld, monsters, phase, view]);
+
+  useEffect(() => {
+    if (!ad) {
+      stopDay3Audio(adAudioRef.current);
+      adAudioRef.current = null;
+    }
+  }, [ad]);
+
+  useEffect(() => {
+    const shouldPulse = phase === "playing" && !gameover && contamination > 18;
+    if (!shouldPulse) {
+      stopDay3Audio(panicAudioRef.current);
+      panicAudioRef.current = null;
+      return undefined;
+    }
+
+    if (!panicAudioRef.current) {
+      const audio = new Audio(DAY3_ASSETS.panic);
+      audio.loop = true;
+      audio.volume = 0;
+      panicAudioRef.current = audio;
+      audio.play().catch(() => {});
+    }
+
+    const intensity = clamp((contamination - 18) / 72, 0, 1);
+    panicAudioRef.current.volume = intensity * DAY3_AUDIO_VOLUME.panicMax;
+    panicAudioRef.current.playbackRate = 0.9 + intensity * 0.22;
+
+    return undefined;
+  }, [contamination, gameover, phase]);
+
+  useEffect(() => {
+    if (!ad) {
+      setAdCanSkip(false);
+      return undefined;
+    }
+    setAdCanSkip(false);
+    const timer = setTimeout(() => setAdCanSkip(true), 5000);
+    return () => clearTimeout(timer);
+  }, [ad]);
+
+  useEffect(() => {
+    if (jumpIndex === null) return undefined;
+    if (jumpIndex >= DAY3_JUMP_FRAMES.length - 1) {
+      const timer = setTimeout(() => setJumpIndex(null), 520);
+      return () => clearTimeout(timer);
+    }
+    const timer = setTimeout(() => setJumpIndex((index) => index + 1), 95);
+    return () => clearTimeout(timer);
+  }, [jumpIndex]);
+
+  useEffect(() => {
+    if (!scriptLines.length || phase === "ending") return undefined;
+    const timer = setInterval(() => {
+      setScriptIndex((index) => {
+        if (index < scriptLines.length - 1) return index + 1;
+        if (phase === "tutorial" || phase === "adInfo") {
+          clearInterval(timer);
+          setTimeout(() => {
+            setPhase("tutorialRepair");
+            setScriptIndex(0);
+            setMessage(phase === "tutorial" ? "수리 절차를 시작하십시오." : "수리 절차를 계속 진행하십시오.");
+          }, 500);
+          return index;
+        }
+        if (phase === "radioAttack") {
+          clearInterval(timer);
+          return index;
+        }
+        if (phase === "radioAttack") {
+          clearInterval(timer);
+          setTimeout(() => {
+            triggerDay3Blackout();
+            return;
+            setPhase("blackout");
+            setScriptIndex(0);
+            setMessage("주 전력 상실.");
+          }, 3000);
+        }
+        if (phase === "blackout") {
+          clearInterval(timer);
+          setTimeout(() => {
+            setPhase("playing");
+            setStageIndex(1);
+            setScriptIndex(0);
+            setMessage("수동 복구 절차를 계속 진행하십시오.");
+          }, 900);
+        }
+        return index;
+      });
+    }, 2600);
+    return () => clearInterval(timer);
+  }, [phase, scriptLines.length]);
+
+  useEffect(() => {
+    if (phase !== "introElevator" || day3IntroReady || scriptIndex < DAY3_TEXT.intro.length - 1) return undefined;
+    const timer = setTimeout(() => setDay3IntroReady(true), 2600);
+    return () => clearTimeout(timer);
+  }, [day3IntroReady, phase, scriptIndex]);
+
+  useEffect(() => {
+    if (phase !== "radioAttack" || scriptIndex < DAY3_TEXT.radioAttack.length - 1) return undefined;
+    const timer = setTimeout(() => {
+      triggerDay3Blackout();
+    }, 5600);
+    return () => clearTimeout(timer);
+  }, [phase, scriptIndex]);
+
+  useEffect(() => {
+    if (!ad) return undefined;
+    if (ad.image) {
+      if (ad.image) return undefined;
+      /*
+      const timer = setTimeout(() => {
+        setAd(null);
+        setPhase(ad.nextPhase);
+        setMessage("광고 송출 종료. 조작 권한이 복구되었습니다.");
+      }, 6500);
+      return () => clearTimeout(timer);
+      */
+    }
+    const timer = setInterval(() => {
+      setAd((current) => {
+        if (!current) return current;
+        const lines = DAY3_TEXT.ads[current.index] ?? [];
+        if (current.line < lines.length - 1) return { ...current, line: current.line + 1 };
+        /*
+        setTimeout(() => {
+          setAd(null);
+          setPhase(current.nextPhase);
+          setMessage("광고 송출 종료. 조작 권한이 복구되었습니다.");
+        }, 120);
+        */
+        return current;
+      });
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [ad]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase();
+      if (key === "r") {
+        event.preventDefault();
+        restartDay3();
+        return;
+      }
+      if (key === "p") {
+        event.preventDefault();
+        skipDay3Dialogue();
+        return;
+      }
+      if (key === "o") {
+        event.preventDefault();
+        setHudVisible((visible) => !visible);
+        return;
+      }
+      if (phase === "introElevator" && key === "enter") {
+        event.preventDefault();
+        enterFacility();
+        return;
+      }
+      if (controlsLocked) return;
+      if (key === "a") {
+        event.preventDefault();
+        moveView("left");
+      } else if (key === "d") {
+        event.preventDefault();
+        moveView("right");
+      } else if (key === "s" || key === "w") {
+        event.preventDefault();
+        moveView("center");
+      } else if (key === "f") {
+        event.preventDefault();
+        startFlashlight();
+      } else if (key === "e") {
+        event.preventDefault();
+        if (!event.repeat) toggleRepair();
+      }
+    };
+    const handleKeyUp = (event) => {
+      if (event.key.toLowerCase() === "f") stopFlashlight();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [canRepair, controlsLocked, phase, view, flashlightStability, canFlashlight, isFlashlightHeld]);
+
+  useEffect(() => {
+    if (gameover || phase === "introElevator" || phase === "ending") return undefined;
+    const timer = setInterval(() => {
+      const dt = 0.2;
+
+      setFlashlightStability((value) => {
+        const next = isFlashlightHeld
+          ? value - DAY3_BALANCE.flashlightDrainPerSecond * dt
+          : value + DAY3_BALANCE.flashlightRecoverPerSecond * dt;
+        if (next <= 0) setIsFlashlightHeld(false);
+        return clamp(next, 0, 100);
+      });
+
+      if (phase === "playing") {
+        const closeThreat = monsters.left >= 3 || monsters.right >= 3 ? 0.8 : 0;
+        const base = isRepairing ? DAY3_BALANCE.repairContaminationChange : isFlashlightHeld ? 0 : view === "center" ? 0.4 : 1.2;
+        setContamination((value) => {
+          const next = clamp(value + (base + closeThreat + (stageIndex === 7 ? 0.35 : 0)) * dt, 0, 100);
+          if (next >= 100) triggerGameover("pollution");
+          return next;
+        });
+
+        monsterClockRef.current += dt;
+        const stepTime = Math.max(1.7, DAY3_BALANCE.monsterStepSeconds - (isRepairing ? DAY3_BALANCE.repairMonsterBonus : 0) - stageIndex * 0.22);
+        if (monsterClockRef.current >= stepTime) {
+          monsterClockRef.current = 0;
+          moveMonsterRandomly();
+          /*
+          const side = Math.random() < 0.5 ? "left" : "right";
+          setMonsters((current) => {
+            const next = { ...current, [side]: clamp(current[side] + 1, 0, 4) };
+            setMessage(side === "left" ? "왼쪽 어둠 속에서 물이 눌리는 소리가 들린다." : "오른쪽 벽 너머로 금속이 긁히는 소리가 들린다.");
+            return next;
+          });
+          playMonsterMove(side, clamp(monsters[side] + 1, 0, 4), false);
+          */
+        }
+
+        if (isFlashlightHeld && (view === "left" || view === "right")) {
+          flashlightRepelClockRef.current += dt;
+          if (flashlightRepelClockRef.current >= DAY3_BALANCE.flashlightRepelSeconds) {
+            flashlightRepelClockRef.current = 0;
+            repelMonsterWithFlashlight(view);
+            /*
+            const side = view;
+            setMonsters((current) => {
+              if (current[side] < 2) return current;
+              const nextLevel = clamp(current[side] - 1, 0, 4);
+              playMonsterMove(side, nextLevel, true);
+              setAttackTimers((timers) => ({ ...timers, [side]: null }));
+              return { ...current, [side]: nextLevel };
+            });
+            */
+          }
+        } else {
+          flashlightRepelClockRef.current = 0;
+        }
+
+        setAttackTimers((timers) => {
+          const next = { ...timers };
+          ["left", "right"].forEach((side) => {
+            if (monsters[side] >= 4) {
+              if (next[side] === null) next[side] = DAY3_BALANCE.attackWaitSeconds;
+              const pressured = isRepairing || view !== side;
+              if (!ad && next[side] > 0) {
+                next[side] -= dt * (pressured ? DAY3_BALANCE.attackPressureMultiplier : 1);
+              }
+              if (!ad && next[side] <= 0) {
+                next[side] = 0;
+                attackRollClockRef.current[side] += dt;
+                if (attackRollClockRef.current[side] >= DAY3_BALANCE.attackRollSeconds) {
+                  attackRollClockRef.current[side] = 0;
+                  if (Math.random() < DAY3_BALANCE.attackRollChance) triggerGameover("monster");
+                }
+              }
+            } else {
+              next[side] = null;
+              attackRollClockRef.current[side] = 0;
+            }
+          });
+          return next;
+        });
+      }
+
+      if (isRepairing && canRepair) {
+        repairIdleRef.current = 0;
+        const speed = stageIndex === 7 ? DAY3_BALANCE.finalRepairPerSecond : DAY3_BALANCE.repairPerSecond;
+        setStageProgress((value) => {
+          const next = clamp(value + speed * dt, 0, 100);
+          if (phase === "tutorialRepair" && !adShownRef.current.has(0) && next >= 30) {
+            startAd(0, "adInfo");
+            return 30;
+          }
+          if (next >= 100) finishCurrentStage();
+          return next;
+        });
+      } else if ((phase === "tutorialRepair" || phase === "playing") && !ad) {
+        repairIdleRef.current += dt;
+        const grace = stageIndex === 7 ? DAY3_BALANCE.finalRepairGrace : DAY3_BALANCE.repairGrace;
+        if (repairIdleRef.current > grace) {
+          const decay = stageIndex === 7 ? DAY3_BALANCE.finalDecayPerSecond : DAY3_BALANCE.decayPerSecond;
+          setStageProgress((value) => clamp(value - decay * dt, 0, 100));
+        }
+      }
+    }, 200);
+    return () => clearInterval(timer);
+  }, [phase, isRepairing, isFlashlightHeld, canRepair, stageIndex, view, monsters, monsterPosition, ad, gameover]);
+
+  const activeScriptText = scriptLines[scriptIndex] ?? message;
+  const adText = ad ? DAY3_TEXT.ads[ad.index]?.[ad.line] : null;
+  const contaminationLabel = contamination < 25 ? "안정" : contamination < 50 ? "불안정" : contamination < 75 ? "침식 진행" : "붕괴 임박";
+  const leftCue = monsters.left === 0 ? "정적" : monsters.left < 3 ? "젖은 발소리" : "질척임 근접";
+  const rightCue = monsters.right === 0 ? "정적" : monsters.right < 3 ? "금속 긁힘" : "철판 울림 근접";
+
+  const activeMonsterSide = getDay3MonsterSide(monsterPosition);
+  const activeKillTimer = activeMonsterSide === "left" || activeMonsterSide === "right" ? attackTimers[activeMonsterSide] : null;
+  const killTimerLabel = activeKillTimer === null
+    ? "대기 없음"
+    : activeKillTimer > 0
+      ? `${activeMonsterSide.toUpperCase()} ${activeKillTimer.toFixed(1)}s`
+      : `${activeMonsterSide.toUpperCase()} 공격 판정 중`;
+  const monsterPositionLabel = `${monsterPosition.toUpperCase()} / KILL ${killTimerLabel}`;
+  const corruptionLevel = clamp(contamination / 95, 0, 1);
+  const showDay3Message = phase !== "playing" && !ad;
+
+  return (
+    <div
+      key={resetSeed}
+      className={`day3-game${darkMode ? " is-dark" : ""}${isFlashlightHeld ? " has-flashlight" : ""}${!hudVisible ? " is-hud-hidden" : ""}${day3GameFadingIn ? " is-fading-in" : ""}`}
+      style={{
+        "--day3-corruption": corruptionLevel,
+        "--day3-corruption-edge": `${18 + corruptionLevel * 42}%`,
+      }}
+      onMouseMove={handleMouseMove}
+      onPointerDown={handleScenePointerDown}
+      onPointerUp={handleScenePointerUp}
+      onPointerCancel={handleScenePointerUp}
+      onPointerLeave={handleScenePointerUp}
+    >
+      {phase !== "introElevator" && (
+        <div className={`day3-panorama-layer view-${view}`}>
+          <img className={`day3-panorama view-${view}`} src={DAY3_ASSETS.mainImage} alt="" />
+          <div className="day3-industrial-fallback" />
+          <section className={`day3-panel${view !== "center" ? " is-hidden" : ""}`}>
+            <div className="day3-panel-screen">
+              <span>현재 단계 {stageIndex + 1} / 8</span>
+              <h1>{DAY3_STAGE_NAMES[stageIndex]}</h1>
+              <div className="day3-progress">
+                <i style={{ width: `${stageProgress}%` }} />
+              </div>
+              <em>{Math.round(stageProgress)}%</em>
+              <button
+                type="button"
+                disabled={!canRepair}
+                onClick={toggleRepair}
+              >
+                {isRepairing ? "E / 수리 정지" : "E / 수리 시작"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {phase !== "introElevator" && (
+        <>
+          <div className="day3-light-flicker" />
+          <div className="day3-dust" />
+          <div className="day3-vignette" />
+          <div className="day3-corruption" />
+          {flashPulse && <div className={`day3-flash day3-flash-${flashPulse}${isFlashlightHeld ? " is-held" : ""}`} />}
+        </>
+      )}
+
+      {phase === "introElevator" ? (
+        <ElevatorIntro
+          ready={day3IntroReady}
+          progress={day3IntroReady ? 1 : scriptIndex / Math.max(1, DAY3_TEXT.intro.length - 1)}
+          line={!day3IntroReady ? activeScriptText : ""}
+          onEnter={enterFacility}
+          onSkip={skipDay3Intro}
+          exiting={day3IntroExiting}
+        />
+      ) : (
+        <>
+          <header className="day3-topbar">
+            <span>제3격리벽 하부 정비구역</span>
+            <span>{phase === "playing" ? "정전 / 수동 복구" : "정비 절차 대기"}</span>
+          </header>
+
+          <aside className="day3-left-hud">
+            <strong>목표</strong>
+            {DAY3_STAGE_NAMES.map((name, index) => (
+              <span key={name} className={completedStages[index] ? "is-done" : index === stageIndex ? "is-active" : ""}>
+                {completedStages[index] ? "✓" : String(index + 1).padStart(2, "0")} {name}
+              </span>
+            ))}
+          </aside>
+
+          <aside className="day3-right-hud">
+            <strong>상태</strong>
+            <span>정신오염도 {Math.round(contamination)} / 100</span>
+            <span>{contaminationLabel}</span>
+            <span>손전등 안정도 {Math.round(flashlightStability)}%</span>
+            <span>DEV 괴물 위치: {monsterPositionLabel}</span>
+            <span>좌측: {leftCue}</span>
+            <span>우측: {rightCue}</span>
+          </aside>
+
+          <nav className="day3-nav">
+            <button type="button" onClick={() => moveView("left")} disabled={controlsLocked}>A 좌측</button>
+            <button type="button" onClick={() => moveView("center")} disabled={controlsLocked}>W/S 중앙</button>
+            <button type="button" onClick={() => moveView("right")} disabled={controlsLocked}>D 우측</button>
+            <button
+              type="button"
+              onClick={toggleFlashlight}
+              disabled={!canFlashlight}
+            >
+              F 손전등
+            </button>
+          </nav>
+
+          {phase === "tutorial" && scriptIndex >= DAY3_TEXT.tutorial.length - 1 && (
+            <button type="button" className="day3-start-repair" onClick={beginTutorialRepair} hidden>1단계 수리 시작</button>
+          )}
+
+          {showDay3Message && <div className="day3-message">{adText ?? activeScriptText ?? message}</div>}
+        </>
+      )}
+
+      {ad && (
+        <div className={`day3-ad${ad.image ? " has-image" : ""}`}>
+          {ad.image ? (
+            <img src={ad.image} alt="" />
+          ) : (
+            <>
+              <span>TTF INTERNAL BROADCAST</span>
+              <p>{adText}</p>
+            </>
+          )}
+          <button type="button" className="day3-ad-skip" onClick={closeDay3Ad} disabled={!adCanSkip}>
+            {adCanSkip ? "SKIP" : "WAIT"}
+          </button>
+        </div>
+      )}
+
+      {phase === "ending" && (
+        <section className="day3-ending">
+          <div className={`day3-shadow${endingStarted ? " is-growing" : ""}`} />
+          <p>{activeScriptText}</p>
+          <button type="button" onClick={onReturnToMenu}>일차 선택</button>
+        </section>
+      )}
+
+      {jumpIndex !== null && DAY3_JUMP_FRAMES[jumpIndex] && (
+        <div className="day3-jump">
+          <img src={DAY3_JUMP_FRAMES[jumpIndex]} alt="" />
+        </div>
+      )}
+
+      {gameover && (jumpIndex === null || jumpIndex >= DAY3_JUMP_FRAMES.length - 1) && (
+        <section className="day3-gameover">
+          <strong>사망</strong>
+          <p>{gameover === "pollution" ? "오염 한계 초과. 정비 담당자 의식 응답 없음." : "접근음이 멈췄다. 바로 옆에서 숨소리가 들린다."}</p>
+          <div className="day3-gameover-actions">
+            <button type="button" onClick={restartDay3}>다시 플레이</button>
+            <button type="button" onClick={onReturnToMenu}>첫 화면으로</button>
+          </div>
+        </section>
+      )}
+
+      {false && gameover && (jumpIndex === null || jumpIndex >= DAY3_JUMP_FRAMES.length - 1) && (
+        <section className="day3-gameover">
+          <strong>{gameover === "pollution" ? "오염 한계 초과." : "신호 손실."}</strong>
+          <p>{gameover === "pollution" ? "정비 담당자 의식 응답 없음. 복구 작업을 계속합니다." : "접근음이 멈췄다. 바로 옆에서 숨소리가 들린다."}</p>
+          <button type="button" onClick={onReturnToMenu}>일차 선택</button>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function DaySelect({ unlockedDay, onSelect }) {
   return (
     <main className="day-select">
@@ -2411,6 +3747,10 @@ function App() {
 
   if (selectedDay === 2) {
     return <DayTwoGame onReturnToMenu={() => setSelectedDay(null)} onCompleteDay={() => completeDay(2)} />;
+  }
+
+  if (selectedDay === 3) {
+    return <DayThreeGame onReturnToMenu={() => setSelectedDay(null)} onCompleteDay={() => completeDay(3)} />;
   }
 
   return <DaySelect unlockedDay={unlockedDay} onSelect={setSelectedDay} />;
