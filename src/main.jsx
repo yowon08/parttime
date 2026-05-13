@@ -2532,7 +2532,7 @@ const DAY3_BALANCE = {
   finalRepairGrace: 2,
   decayPerSecond: 2,
   finalDecayPerSecond: 3,
-  repairContaminationChange: -2,
+  repairContaminationChange: -1.3,
   flashlightDrainPerSecond: 10,
   flashlightRecoverPerSecond: 10,
   flashlightRepelSeconds: 0.65,
