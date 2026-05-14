@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { INTRO_LINES } from "./introLines.js";
 import { DAY2_INTRO_LINES } from "./day2IntroLines.js";
 import { DAY3_TEXT } from "./day3Text.js";
+import { DAY_CLEAR_LINES } from "./dayClearLines.js";
 import "./styles.css";
 
 const CCTV_FRAMES = Array.from({ length: 12 }, (_, index) => `/cctv/frame_${String(index + 1).padStart(2, "0")}.png`);
@@ -21,6 +22,8 @@ const AUDIO = {
   monster: "/songs/monster.mp3",
   noise: "/songs/noise.mp3",
   run: "/songs/run.mp3",
+  dayClear: "/songs/dayclear.mp3",
+  dayClear2: "/songs/dayclear2.mp3",
 };
 const CONFIG = {
   BGM_VOLUME: 0.28,
@@ -57,6 +60,22 @@ const G_RUN_FINAL_GRACE = CONFIG.G_RUN_FINAL_GRACE;
 const G_RUN_FRAME_DURATION = CONFIG.G_RUN_FRAME_DURATION;
 const INTRO_PAUSE_TOKEN = "dlay";
 const ELEVATOR_IMAGE = "/ev/ev.png";
+const DAY_ENDING_LINE_DURATION = 3300;
+const DAY_ENDING_FADE_DURATION = 3000;
+const DAY_CLEAR_LINE_DURATION = 3200;
+const DAY_CLEAR_FADE_DURATION = 3000;
+const DAY_CLEAR_TITLE_DURATION = 12000;
+const DAY1_ENDING_LINES = [
+  "수고하셨습니다.",
+  "관측 기록이 정상 제출되었습니다.",
+  "퇴실 전 소독 절차를 잊지 마십시오.",
+];
+const DAY2_ENDING_LINES = [
+  "수고하셨습니다.",
+  "실험체 대응 절차가 종료되었습니다.",
+  "퇴실 전 소독 절차를 잊지 마십시오.",
+];
+const DAY3_ENDING_IMAGES = [ELEVATOR_IMAGE, "/ev/ev2.png", "/ev/ev3.png", "/ev/ev4.png", "/ev/ev5.png"];
 const INTRO_VOICE_FILES = Array.from({ length: 17 }, (_, index) => `/voice/${index + 1}.mp3`);
 const AMBIENT_SFX_FILES = Object.values(
   import.meta.glob("/public/sfx/*.{mp3,wav,ogg}", { eager: true, query: "?url", import: "default" })
@@ -75,6 +94,32 @@ const DAY3_JUMP_FRAMES = Object.values(
   return aNumber - bNumber;
 });
 const DAY3_AD_IMAGES = Array.from({ length: 4 }, (_, index) => `/ad/${index + 1}.png`);
+const DAY3_ENDING_SCRIPTS = {
+  ending1: [
+    "수고하셨습니다.",
+    "당신의 헌신 덕분에 우리는 다시 통제와 안정을 되찾을 수 있게 되었습니다.",
+    "귀하의 생존과 복귀를 진심으로 환영합니다.",
+  ],
+  ending2: [
+    "해당 개체는 적색지대에서 처음 관측되었습니다.",
+    "다른 것들을 흉내내고 모방하며, 인간의 정신을 침식할 수 있습니다.",
+    "그것은 지성을 지니고 있으며—",
+    "때론 아주 교활하게 인간을 덫으로 몰아넣기도 하죠.",
+    "우리는 그것을 변이체-C311이라고 명명했습니다.",
+  ],
+  ending3: [
+    "귀하의 생존과 복귀를 진심으로 환영합니다.",
+  ],
+};
+const DAY3_ENDING_ONE_END = DAY3_ENDING_SCRIPTS.ending1.length;
+const DAY3_ENDING_TWO_START = DAY3_ENDING_ONE_END;
+const DAY3_ENDING_TWO_END = DAY3_ENDING_ONE_END + DAY3_ENDING_SCRIPTS.ending2.length;
+const DAY3_ENDING_SCRIPTED_SEQUENCE = [
+  ...DAY3_ENDING_SCRIPTS.ending1,
+  ...DAY3_ENDING_SCRIPTS.ending2,
+  "",
+  ...DAY3_ENDING_SCRIPTS.ending3,
+];
 const DAY_COUNT = 3;
 const IMPLEMENTED_DAYS = 3;
 const DEFAULT_UNLOCKED_DAY = 3;
@@ -368,6 +413,7 @@ function ElevatorIntro({ ready, progress, line, onEnter, onSkip, exiting }) {
     <main className={`screen elevator-intro${ready ? " is-arrived" : ""}${exiting ? " is-exiting" : ""}`}>
       <img src={ELEVATOR_IMAGE} alt="" className="elevator-image is-active" draggable="false" />
       <div className="elevator-vibration" />
+      <div className="elevator-shadow-pass" />
       {!ready && !line && (
         <section className="elevator-panel">
           <span>FACILITY DESCENT</span>
@@ -385,6 +431,108 @@ function ElevatorIntro({ ready, progress, line, onEnter, onSkip, exiting }) {
         <button type="button" className="enter-button" onClick={onEnter}>
           진입
         </button>
+      )}
+    </main>
+  );
+}
+
+function ElevatorReturn({ line, fading = false, menuFading = false, image = ELEVATOR_IMAGE }) {
+  return (
+    <main className={`screen elevator-intro elevator-return${fading ? " is-exiting" : ""}${menuFading ? " is-menu-fading" : ""}`}>
+      <img src={image} alt="" className="elevator-image is-active" draggable="false" />
+      <div className="elevator-vibration" />
+      <div className="elevator-shadow-pass" />
+      {line && <div key={line} className="intro-subtitle">{line}</div>}
+    </main>
+  );
+}
+
+function DayClearBridge({ day, lines, onDone }) {
+  const [lineIndex, setLineIndex] = useState(0);
+  const [phase, setPhase] = useState("scene");
+
+  useEffect(() => {
+    if (day !== 3) return undefined;
+    const audio = new Audio(AUDIO.on);
+    audio.volume = 0.62;
+    audio.play().catch(() => {});
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [day]);
+
+  useEffect(() => {
+    if (phase !== "scene") return undefined;
+    if (lineIndex >= lines.length) {
+      const timer = setTimeout(() => setPhase("clear"), DAY_CLEAR_FADE_DURATION);
+      return () => clearTimeout(timer);
+    }
+
+    const timer = setTimeout(() => {
+      setLineIndex((index) => index + 1);
+    }, DAY_CLEAR_LINE_DURATION);
+    return () => clearTimeout(timer);
+  }, [lineIndex, lines.length, phase]);
+
+  useEffect(() => {
+    if (phase !== "clear") return undefined;
+    const audioA = new Audio(AUDIO.dayClear);
+    const audioB = new Audio(AUDIO.dayClear2);
+    audioA.volume = 0.82;
+    audioB.volume = 0.72;
+    audioA.play().catch(() => {});
+    audioB.play().catch(() => {});
+
+    const fadeStart = Date.now() + DAY_CLEAR_TITLE_DURATION - 1700;
+    const fadeTimer = setInterval(() => {
+      const progress = clamp((Date.now() - fadeStart) / 1500, 0, 1);
+      const level = 1 - progress;
+      audioA.volume = 0.82 * level;
+      audioB.volume = 0.72 * level;
+    }, 50);
+    const doneTimer = setTimeout(() => {
+      clearInterval(fadeTimer);
+      audioA.pause();
+      audioB.pause();
+      onDone();
+    }, DAY_CLEAR_TITLE_DURATION);
+
+    return () => {
+      clearInterval(fadeTimer);
+      clearTimeout(doneTimer);
+      audioA.pause();
+      audioB.pause();
+    };
+  }, [onDone, phase]);
+
+  const currentLine = phase === "scene" ? lines[lineIndex] ?? "" : "";
+
+  return (
+    <main className={`screen day-clear-bridge day-clear-day-${day} is-${phase}`}>
+      <div className="day-clear-scene">
+        {day === 3 && <img src={DAY3_ASSETS.mainImage} alt="" className="day-clear-repair-image" draggable="false" />}
+        <div className="day-clear-office" />
+        <div className="day-clear-file" />
+      </div>
+      {phase === "scene" && lineIndex >= lines.length && <div className="day-clear-blackout" />}
+      {currentLine && <div key={currentLine} className="intro-subtitle day-clear-subtitle">{currentLine}</div>}
+      {phase === "clear" && (
+        <div className="day-clear-title">
+          <i className="clear-particle p1" />
+          <i className="clear-particle p2" />
+          <i className="clear-particle p3" />
+          <i className="clear-particle p4" />
+          <i className="clear-particle p5" />
+          <i className="clear-particle p6" />
+          <i className="clear-particle p7" />
+          <i className="clear-particle p8" />
+          <i className="clear-particle p9" />
+          <i className="clear-particle p10" />
+          <i className="clear-particle p11" />
+          <i className="clear-particle p12" />
+          <span>CLEAR</span>
+        </div>
       )}
     </main>
   );
@@ -499,6 +647,10 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const [overlay, setOverlay] = useState(null);
   const [dead, setDead] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [clearBridgeDone, setClearBridgeDone] = useState(false);
+  const [endingLineIndex, setEndingLineIndex] = useState(0);
+  const [endingFading, setEndingFading] = useState(false);
+  const [menuFading, setMenuFading] = useState(false);
   const [rebootRequired, setRebootRequired] = useState(false);
   const [signalFailure, setSignalFailure] = useState(false);
   const [frequency, setFrequency] = useState(22);
@@ -528,6 +680,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const gRunTimer = useRef(null);
   const gRunFailTimer = useRef(null);
   const gRunClearTimer = useRef(null);
+  const endingTimer = useRef(null);
   const bgmRef = useRef(null);
   const onRef = useRef(null);
   const vhsRef = useRef(null);
@@ -583,6 +736,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
       clearTimeout(gRunTimer.current);
       clearTimeout(gRunFailTimer.current);
       clearTimeout(gRunClearTimer.current);
+      clearTimeout(endingTimer.current);
       clearTimeout(gRunThumpTimer.current);
       fadeTimers.current.forEach((timer) => clearInterval(timer));
     };
@@ -882,6 +1036,10 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
     if (!gameStarted || seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
     clearTimeout(overlayTimer.current);
     setCleared(true);
+    setClearBridgeDone(false);
+    setEndingLineIndex(0);
+    setEndingFading(false);
+    setMenuFading(false);
     onCompleteDay?.();
     setCctvOpen(false);
     setTurnedBack(false);
@@ -890,6 +1048,40 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
     fadeAudio(vhsRef.current, 0, 500, { pauseAfter: true });
     fadeAudio(bgmRef.current, BGM_VOLUME, 900, { playBefore: true });
   }, [gameStarted, seconds, dead, cleared]);
+
+  useEffect(() => {
+    if (!cleared || !clearBridgeDone || dead) return undefined;
+    evOnRef.current.currentTime = 0;
+    evRideRef.current.currentTime = 0;
+    evOffRef.current.currentTime = 0;
+    evOnRef.current.play().catch(() => {});
+    evRideRef.current.play().catch(() => {});
+    return () => {
+      evRideRef.current?.pause();
+    };
+  }, [cleared, clearBridgeDone, dead]);
+
+  useEffect(() => {
+    if (!cleared || !clearBridgeDone || dead) return undefined;
+    clearTimeout(endingTimer.current);
+
+    if (endingLineIndex >= DAY1_ENDING_LINES.length) {
+      setEndingFading(true);
+      endingTimer.current = setTimeout(() => {
+        evRideRef.current?.pause();
+        evOffRef.current.currentTime = 0;
+        evOffRef.current.play().catch(() => {});
+        setMenuFading(true);
+        endingTimer.current = setTimeout(onReturnToMenu, DAY_ENDING_FADE_DURATION);
+      }, DAY_ENDING_FADE_DURATION);
+      return () => clearTimeout(endingTimer.current);
+    }
+
+    endingTimer.current = setTimeout(() => {
+      setEndingLineIndex((index) => index + 1);
+    }, DAY_ENDING_LINE_DURATION);
+    return () => clearTimeout(endingTimer.current);
+  }, [cleared, clearBridgeDone, dead, endingLineIndex, onReturnToMenu]);
 
   useEffect(() => {
     if (!gameStarted || dead || cleared || signalFailure || ambushPending || overlay || monitorMotion) return undefined;
@@ -989,6 +1181,16 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
 
       const state = gameStateRef.current; // 항상 최신 상태를 참조
       const key = event.key.toLowerCase();
+
+      if (key === "i") {
+        event.preventDefault();
+        setCctvOpen(true);
+        setTurnedBack(false);
+        setRebootRequired(false);
+        setSignalFailure(false);
+        setSeconds(CLEAR_TIME_SECONDS - 1);
+        return;
+      }
 
       // 반복 입력 무시 (뒤돌아 있는 상태에서의 A/D 키 제외)
       if (event.repeat && !(state.turnedBack && !state.rearPanelClosing && (key === "a" || key === "d"))) return;
@@ -1529,11 +1731,11 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
       )}
 
       {cleared ? (
-        <div className="clear-screen">
-          <strong>관측 완료</strong>
-          <span>06:00 AM</span>
-          <button type="button" onClick={onReturnToMenu}>일차 선택</button>
-        </div>
+        clearBridgeDone ? (
+          <ElevatorReturn line={DAY1_ENDING_LINES[endingLineIndex] ?? ""} fading={endingFading} menuFading={menuFading} />
+        ) : (
+          <DayClearBridge day={1} lines={DAY_CLEAR_LINES[1]} onDone={() => setClearBridgeDone(true)} />
+        )
       ) : monitorMotion ? (
         <MonitorFrame frame={monitorFrame} staticBurst={staticBurst} />
       ) : cctvOpen && !turnedBack ? (
@@ -1674,6 +1876,9 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const [fadingIn, setFadingIn] = useState(false);
   const [clearFading, setClearFading] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [clearBridgeDone, setClearBridgeDone] = useState(false);
+  const [endingLineIndex, setEndingLineIndex] = useState(0);
+  const [endingFading, setEndingFading] = useState(false);
   const [dead, setDead] = useState(false);
   const [jumpIndex, setJumpIndex] = useState(null);
   const [stage, setStage] = useState(1);
@@ -1717,6 +1922,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const sedativeEffectTimer = useRef(null);
   const sedativeResetTimer = useRef(null);
   const clearTimer = useRef(null);
+  const endingTimer = useRef(null);
   const jumpTimer = useRef(null);
   const panelExposureRef = useRef(0);
   const bgmRef = useRef(null);
@@ -1751,6 +1957,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
       clearTimeout(sedativeEffectTimer.current);
       clearTimeout(sedativeResetTimer.current);
       clearTimeout(clearTimer.current);
+      clearTimeout(endingTimer.current);
       clearTimeout(jumpTimer.current);
       clearInterval(introTimer.current);
     };
@@ -1978,11 +2185,49 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
         setClearFading(true);
         clearTimer.current = setTimeout(() => {
           setCleared(true);
+          setClearBridgeDone(false);
+          setEndingLineIndex(0);
+          setEndingFading(false);
+          setMenuFading(false);
           onCompleteDay?.();
         }, 2100);
       }, (closingPanel ? REAR_PANEL_CLOSE_DURATION : 0) + 2000);
     }
   }, [audioStep, phase, onCompleteDay, taskPanelOpen, reportPanelOpen]);
+
+  useEffect(() => {
+    if (!cleared || !clearBridgeDone || dead) return undefined;
+    evOnRef.current.currentTime = 0;
+    evRideRef.current.currentTime = 0;
+    evOffRef.current.currentTime = 0;
+    evOnRef.current.play().catch(() => {});
+    evRideRef.current.play().catch(() => {});
+    return () => {
+      evRideRef.current?.pause();
+    };
+  }, [cleared, clearBridgeDone, dead]);
+
+  useEffect(() => {
+    if (!cleared || !clearBridgeDone || dead) return undefined;
+    clearTimeout(endingTimer.current);
+
+    if (endingLineIndex >= DAY2_ENDING_LINES.length) {
+      setEndingFading(true);
+      endingTimer.current = setTimeout(() => {
+        evRideRef.current?.pause();
+        evOffRef.current.currentTime = 0;
+        evOffRef.current.play().catch(() => {});
+        setMenuFading(true);
+        endingTimer.current = setTimeout(onReturnToMenu, DAY_ENDING_FADE_DURATION);
+      }, DAY_ENDING_FADE_DURATION);
+      return () => clearTimeout(endingTimer.current);
+    }
+
+    endingTimer.current = setTimeout(() => {
+      setEndingLineIndex((index) => index + 1);
+    }, DAY_ENDING_LINE_DURATION);
+    return () => clearTimeout(endingTimer.current);
+  }, [cleared, clearBridgeDone, dead, endingLineIndex, onReturnToMenu]);
 
   useEffect(() => {
     if (jumpIndex === null) return undefined;
@@ -2256,6 +2501,25 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   useEffect(() => {
     const handleKey = (event) => {
       if (!gameStarted || dead || cleared) return;
+      if (event.key.toLowerCase() === "i" || event.code === "KeyI") {
+        event.preventDefault();
+        stopSoundTest();
+        setTaskPanelOpen(false);
+        setReportPanelOpen(false);
+        setHoldTask(null);
+        setTaskProgress([100, 100, 100, 100]);
+        setPhase("sound");
+        setAudioPlaying(false);
+        setAudioEnded(true);
+        setAudioStep(DAY2_SOUND_TESTS.length);
+        setClearFading(false);
+        setClearBridgeDone(false);
+        setEndingLineIndex(0);
+        setEndingFading(false);
+        setMenuFading(false);
+        bgmRef.current?.pause();
+        return;
+      }
       if (event.key === "Shift") {
         event.preventDefault();
         if (phase === "tasks") {
@@ -2278,7 +2542,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     };
     document.addEventListener("keydown", handleKey, true);
     return () => document.removeEventListener("keydown", handleKey, true);
-  }, [gameStarted, dead, cleared, phase, taskPanelOpen, taskPanelClosing]);
+  }, [gameStarted, dead, cleared, phase, taskPanelOpen, taskPanelClosing, onCompleteDay]);
 
   return (
     <div className="game day2-game">
@@ -2399,10 +2663,11 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
           {clearFading && !cleared && !dead && <div className="day2-clear-fade" />}
 
           {cleared && !dead && (
-            <div className="clear-screen">
-              <strong>2일차 완료</strong>
-              <button type="button" onClick={onReturnToMenu}>일차 선택</button>
-            </div>
+            clearBridgeDone ? (
+              <ElevatorReturn line={DAY2_ENDING_LINES[endingLineIndex] ?? ""} fading={endingFading} menuFading={menuFading} />
+            ) : (
+              <DayClearBridge day={2} lines={DAY_CLEAR_LINES[2]} onDone={() => setClearBridgeDone(true)} />
+            )
           )}
         </main>
       )}
@@ -2544,10 +2809,11 @@ const DAY3_BALANCE = {
   attackPressureMultiplier: 2,
   attackRollSeconds: 1,
   attackRollChance: 0.33,
-  flashlightPanicDashChance: 0.7,
-  adReturnChanceMin: 0.08,
+  flashlightPanicDashChance: 0.5,
+  viewTransitionMs: 1150,
+  adReturnChanceMin: 0.02,
   adReturnChanceMax: 0.36,
-  adReturnChanceStep: 0.055,
+  adReturnRampMs: 30000,
 };
 
 const DAY3_MONSTER_GRAPH = {
@@ -2645,6 +2911,9 @@ function getDay3NaturalMoveOptions(position) {
   const [message, setMessage] = useState("안내를 확인하십시오.");
   const [gameover, setGameover] = useState(null);
   const [endingStarted, setEndingStarted] = useState(false);
+  const [endingFading, setEndingFading] = useState(false);
+  const [endingComplete, setEndingComplete] = useState(false);
+  const [endingImageIndex, setEndingImageIndex] = useState(0);
   const [jumpIndex, setJumpIndex] = useState(null);
   const repairIdleRef = useRef(0);
   const monsterClockRef = useRef(0);
@@ -2664,7 +2933,9 @@ function getDay3NaturalMoveOptions(position) {
   const flashlightRepelClockRef = useRef(0);
   const monsterMovingRef = useRef(false);
   const attackRollClockRef = useRef({ left: 0, right: 0 });
-  const adReturnChanceRef = useRef(DAY3_BALANCE.adReturnChanceMin);
+  const returnAdTimerRef = useRef(null);
+  const endingTimerRef = useRef(null);
+  const lastAdAtRef = useRef(Date.now());
 
   function restartDay3() {
     [bgmRef.current, repairAudioRef.current, closeLoopRef.current, adAudioRef.current, panicAudioRef.current, jumpAudioRef.current, evOnRef.current, evRideRef.current, evOffRef.current].forEach(stopDay3Audio);
@@ -2680,7 +2951,11 @@ function getDay3NaturalMoveOptions(position) {
     repairIdleRef.current = 0;
     monsterClockRef.current = 0;
     attackRollClockRef.current = { left: 0, right: 0 };
-    adReturnChanceRef.current = DAY3_BALANCE.adReturnChanceMin;
+    clearTimeout(returnAdTimerRef.current);
+    returnAdTimerRef.current = null;
+    clearTimeout(endingTimerRef.current);
+    endingTimerRef.current = null;
+    lastAdAtRef.current = Date.now();
     finishingRef.current = false;
     adShownRef.current = new Set();
     usedAdImagesRef.current = new Set();
@@ -2709,6 +2984,9 @@ function getDay3NaturalMoveOptions(position) {
     setMessage("안내를 확인하십시오.");
     setGameover(null);
     setEndingStarted(false);
+    setEndingFading(false);
+    setEndingComplete(false);
+    setEndingImageIndex(0);
     setJumpIndex(null);
     setResetSeed((seed) => seed + 1);
   }
@@ -2723,10 +3001,18 @@ function getDay3NaturalMoveOptions(position) {
     return [];
   }, [phase]);
 
-  const darkMode = ["blackout", "playing", "ending", "gameover"].includes(phase);
-  const controlsLocked = Boolean(ad) || phase === "introElevator" || phase === "adInfo" || phase === "radioAttack" || phase === "blackout" || phase === "ending" || Boolean(gameover);
+  const darkMode = ["blackout", "playing", "clearBridge", "ending", "gameover"].includes(phase);
+  const controlsLocked = Boolean(ad) || phase === "introElevator" || phase === "adInfo" || phase === "radioAttack" || phase === "blackout" || phase === "clearBridge" || phase === "ending" || Boolean(gameover);
   const canRepair = !controlsLocked && (phase === "tutorialRepair" || phase === "playing") && view === "center";
   const canFlashlight = !controlsLocked && ["tutorial", "tutorialRepair", "playing"].includes(phase) && view !== "center" && flashlightStability > 0;
+
+  useEffect(() => {
+    return () => clearTimeout(returnAdTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(endingTimerRef.current);
+  }, []);
 
   function playDay3Effect(src, volume = 0.45) {
     if (!src) return null;
@@ -2899,7 +3185,7 @@ function getDay3NaturalMoveOptions(position) {
 
   function startAd(index, nextPhase = "playing") {
     adShownRef.current.add(index);
-    adReturnChanceRef.current = DAY3_BALANCE.adReturnChanceMin;
+    lastAdAtRef.current = Date.now();
     const remainingAds = DAY3_AD_IMAGES.filter((image) => !usedAdImagesRef.current.has(image));
     if (!remainingAds.length) {
       setPhase(nextPhase);
@@ -2911,8 +3197,6 @@ function getDay3NaturalMoveOptions(position) {
     setIsRepairing(false);
     setIsFlashlightHeld(false);
     setAdCanSkip(false);
-    stopDay3Audio(adAudioRef.current);
-    adAudioRef.current = playDay3Effect(DAY3_ASSETS.ad, DAY3_AUDIO_VOLUME.ad);
     setAd({ index, line: 0, nextPhase, image: selectedAdImage });
     setMessage("사내 광고 송출 중. 입력이 제한됩니다.");
   }
@@ -2936,9 +3220,8 @@ function getDay3NaturalMoveOptions(position) {
       }
 
       if (finished >= 7) {
-        setPhase("ending");
+        setPhase("clearBridge");
         setScriptIndex(0);
-        setEndingStarted(true);
         onCompleteDay();
         return;
       }
@@ -3012,7 +3295,8 @@ function getDay3NaturalMoveOptions(position) {
       return;
     }
     if (phase === "ending") {
-      setScriptIndex(DAY3_TEXT.ending.length - 1);
+      setScriptIndex(DAY3_ENDING_SCRIPTED_SEQUENCE.length - 1);
+      setEndingFading(true);
     }
   }
 
@@ -3030,21 +3314,91 @@ function getDay3NaturalMoveOptions(position) {
     setMessage("광고 송출 종료. 조작 권한이 복구되었습니다.");
   }
 
+  function skipToDay3Ending() {
+    if (phase === "introElevator" || phase === "ending" || gameover) return;
+    clearTimeout(returnAdTimerRef.current);
+    clearTimeout(endingTimerRef.current);
+    stopCloseLoop();
+    stopDay3Audio(repairAudioRef.current);
+    stopDay3Audio(adAudioRef.current);
+    stopDay3Audio(panicAudioRef.current);
+    repairAudioRef.current = null;
+    adAudioRef.current = null;
+    panicAudioRef.current = null;
+    setAd(null);
+    setAdCanSkip(false);
+    setIsRepairing(false);
+    setIsFlashlightHeld(false);
+    setFlashPulse(null);
+    setCompletedStages(Array(8).fill(true));
+    setStageIndex(7);
+    setStageProgress(100);
+    setPhase("ending");
+    setScriptIndex(0);
+    setEndingStarted(true);
+    setEndingFading(false);
+    setEndingComplete(false);
+    setEndingImageIndex(0);
+    onCompleteDay?.();
+  }
+
+  function completeDay3RepairsForTest() {
+    if (phase === "introElevator" || phase === "clearBridge" || phase === "ending" || gameover || finishingRef.current) return;
+    clearTimeout(returnAdTimerRef.current);
+    clearTimeout(endingTimerRef.current);
+    stopCloseLoop();
+    stopDay3Audio(repairAudioRef.current);
+    stopDay3Audio(adAudioRef.current);
+    stopDay3Audio(panicAudioRef.current);
+    repairAudioRef.current = null;
+    adAudioRef.current = null;
+    panicAudioRef.current = null;
+    setAd(null);
+    setAdCanSkip(false);
+    setIsRepairing(false);
+    setIsFlashlightHeld(false);
+    setFlashPulse(null);
+    setCompletedStages([true, true, true, true, true, true, true, false]);
+    setStageIndex(7);
+    setStageProgress(100);
+    setPhase("playing");
+    setMessage("8단계 수리 완료 확인 중...");
+    setTimeout(() => {
+      setCompletedStages(Array(8).fill(true));
+      setStageProgress(0);
+      setPhase("clearBridge");
+      setScriptIndex(0);
+      onCompleteDay?.();
+    }, 900);
+  }
+
+  function startDay3EndingFromBridge() {
+    setPhase("ending");
+    setScriptIndex(0);
+    setEndingStarted(true);
+    setEndingFading(false);
+    setEndingComplete(false);
+    setEndingImageIndex(0);
+  }
+
+  function skipDay3Ending() {
+    if (phase !== "ending") return;
+    clearTimeout(endingTimerRef.current);
+    setScriptIndex(DAY3_ENDING_SCRIPTED_SEQUENCE.length - 1);
+    setEndingFading(true);
+    setTimeout(() => setEndingComplete(true), 900);
+  }
+
   function tryRandomReturnAd(previousView, nextView) {
     if (phase !== "playing" || previousView === "center" || nextView !== "center" || ad || gameover) return;
     const candidates = [1, 2, 3].filter((index) => !adShownRef.current.has(index));
     if (!candidates.length) return;
 
-    if (Math.random() < adReturnChanceRef.current) {
+    const ramp = clamp((Date.now() - lastAdAtRef.current) / DAY3_BALANCE.adReturnRampMs, 0, 1);
+    const adChance = DAY3_BALANCE.adReturnChanceMin + (DAY3_BALANCE.adReturnChanceMax - DAY3_BALANCE.adReturnChanceMin) * ramp;
+    if (Math.random() < adChance) {
       startAd(randomItem(candidates), "playing");
-      return;
     }
-
-    adReturnChanceRef.current = clamp(
-      adReturnChanceRef.current + DAY3_BALANCE.adReturnChanceStep,
-      DAY3_BALANCE.adReturnChanceMin,
-      DAY3_BALANCE.adReturnChanceMax
-    );
   }
 
   function moveView(nextView) {
@@ -3052,7 +3406,13 @@ function getDay3NaturalMoveOptions(position) {
     const previousView = view;
     if (nextView !== "center") setIsRepairing(false);
     setView(nextView);
-    tryRandomReturnAd(previousView, nextView);
+    clearTimeout(returnAdTimerRef.current);
+    if (previousView !== "center" && nextView === "center") {
+      returnAdTimerRef.current = setTimeout(() => {
+        tryRandomReturnAd(previousView, nextView);
+        returnAdTimerRef.current = null;
+      }, DAY3_BALANCE.viewTransitionMs);
+    }
   }
 
   function toggleRepair() {
@@ -3176,7 +3536,7 @@ function getDay3NaturalMoveOptions(position) {
   }, [day3IntroReady]);
 
   useEffect(() => {
-    const shouldPlay = phase !== "introElevator" && phase !== "gameover" && !gameover;
+    const shouldPlay = !["introElevator", "clearBridge", "ending", "gameover"].includes(phase) && !gameover;
     if (shouldPlay && !bgmRef.current) {
       const audio = new Audio(DAY3_ASSETS.bgm);
       audio.loop = true;
@@ -3265,11 +3625,20 @@ function getDay3NaturalMoveOptions(position) {
   useEffect(() => {
     if (!ad) {
       setAdCanSkip(false);
+      stopDay3Audio(adAudioRef.current);
+      adAudioRef.current = null;
       return undefined;
     }
+
+    stopDay3Audio(adAudioRef.current);
+    adAudioRef.current = playDay3Effect(DAY3_ASSETS.ad, DAY3_AUDIO_VOLUME.ad);
     setAdCanSkip(false);
     const timer = setTimeout(() => setAdCanSkip(true), 5000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      stopDay3Audio(adAudioRef.current);
+      adAudioRef.current = null;
+    };
   }, [ad]);
 
   useEffect(() => {
@@ -3324,6 +3693,65 @@ function getDay3NaturalMoveOptions(position) {
     }, 2600);
     return () => clearInterval(timer);
   }, [phase, scriptLines.length]);
+
+  useEffect(() => {
+    if (phase !== "ending" || endingComplete) return undefined;
+
+    if (scriptIndex >= DAY3_ENDING_SCRIPTED_SEQUENCE.length - 1) {
+      const fadeTimer = setTimeout(() => {
+        setEndingFading(true);
+        const completeTimer = setTimeout(() => setEndingComplete(true), 3000);
+        endingTimerRef.current = completeTimer;
+      }, 3000);
+      endingTimerRef.current = fadeTimer;
+      return () => clearTimeout(fadeTimer);
+    }
+
+    const currentLine = DAY3_ENDING_SCRIPTED_SEQUENCE[scriptIndex];
+    const delay = currentLine ? 3300 : 1800;
+    const timer = setTimeout(() => {
+      setScriptIndex((index) => Math.min(index + 1, DAY3_ENDING_SCRIPTED_SEQUENCE.length - 1));
+    }, delay);
+    endingTimerRef.current = timer;
+    return () => clearTimeout(timer);
+  }, [endingComplete, phase, scriptIndex]);
+
+  useEffect(() => {
+    if (phase !== "ending") {
+      setEndingImageIndex(0);
+      return undefined;
+    }
+
+    const nextImageIndex = scriptIndex < DAY3_ENDING_ONE_END
+      ? 0
+      : clamp(1 + scriptIndex - DAY3_ENDING_ONE_END, 1, DAY3_ENDING_IMAGES.length - 1);
+    if (nextImageIndex === endingImageIndex) return undefined;
+
+    const timer = setTimeout(() => {
+      setEndingImageIndex(nextImageIndex);
+    }, 1250);
+    return () => clearTimeout(timer);
+  }, [endingImageIndex, phase, scriptIndex]);
+
+  useEffect(() => {
+    if (phase !== "ending") return undefined;
+    ensureDay3ElevatorAudio();
+    evOnRef.current.currentTime = 0;
+    evRideRef.current.currentTime = 0;
+    evOnRef.current.play().catch(() => {});
+    evRideRef.current.play().catch(() => {});
+    return () => {
+      evRideRef.current?.pause();
+    };
+  }, [phase]);
+
+  useEffect(() => {
+    if (!endingComplete) return;
+    evRideRef.current?.pause();
+    if (!evOffRef.current) return;
+    evOffRef.current.currentTime = 0;
+    evOffRef.current.play().catch(() => {});
+  }, [endingComplete]);
 
   useEffect(() => {
     if (phase !== "introElevator" || day3IntroReady || scriptIndex < DAY3_TEXT.intro.length - 1) return undefined;
@@ -3383,9 +3811,15 @@ function getDay3NaturalMoveOptions(position) {
         skipDay3Dialogue();
         return;
       }
+      if (key === "i") {
+        event.preventDefault();
+        if (phase === "ending") skipDay3Ending();
+        else if (!event.repeat) completeDay3RepairsForTest();
+        return;
+      }
       if (key === "o") {
         event.preventDefault();
-        setHudVisible((visible) => !visible);
+        if (!event.repeat) setHudVisible((visible) => !visible);
         return;
       }
       if (phase === "introElevator" && key === "enter") {
@@ -3545,7 +3979,9 @@ function getDay3NaturalMoveOptions(position) {
       : `${activeMonsterSide.toUpperCase()} 공격 판정 중`;
   const monsterPositionLabel = `${monsterPosition.toUpperCase()} / KILL ${killTimerLabel}`;
   const corruptionLevel = clamp(contamination / 95, 0, 1);
-  const showDay3Message = phase !== "playing" && !ad;
+  const showDay3Message = phase !== "playing" && phase !== "ending" && !ad;
+  const endingText = DAY3_ENDING_SCRIPTED_SEQUENCE[scriptIndex] ?? "";
+  const endingImage = DAY3_ENDING_IMAGES[endingImageIndex] ?? ELEVATOR_IMAGE;
 
   return (
     <div
@@ -3667,10 +4103,34 @@ function getDay3NaturalMoveOptions(position) {
         </div>
       )}
 
+      {phase === "clearBridge" && (
+        <DayClearBridge day={3} lines={DAY_CLEAR_LINES[3]} onDone={startDay3EndingFromBridge} />
+      )}
+
       {phase === "ending" && (
-        <section className="day3-ending">
-          <div className={`day3-shadow${endingStarted ? " is-growing" : ""}`} />
-          <p>{activeScriptText}</p>
+        <section className={`day3-ending${endingStarted ? " is-riding" : ""}${endingFading ? " is-fading-out" : ""}${endingComplete ? " is-complete" : ""}`}>
+          <img src={endingImage} alt="" className="elevator-image is-active day3-ending-image" draggable="false" />
+          <div className="elevator-vibration day3-ending-vibration" />
+          <div className="elevator-shadow-pass" />
+          <div className="day3-ending-lines" />
+          {!endingComplete && (
+            <div className={`intro-subtitle day3-ending-caption${!endingText ? " is-silent" : ""}`}>
+              <span>시설 안내 음성</span>
+              <p>{endingText || " "}</p>
+            </div>
+          )}
+          {!endingComplete && (
+            <button type="button" className="intro-skip-button day3-ending-skip" onClick={skipDay3Ending}>
+              I SKIP
+            </button>
+          )}
+          {endingComplete && (
+            <div className="day3-ending-restart">
+              <span className="day3-credits-title">CREDITS</span>
+              <strong>복귀 절차 종료</strong>
+              <button type="button" onClick={restartDay3}>다시 시작</button>
+            </div>
+          )}
           <button type="button" onClick={onReturnToMenu}>일차 선택</button>
         </section>
       )}
