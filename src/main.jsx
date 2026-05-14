@@ -2797,7 +2797,7 @@ const DAY3_BALANCE = {
   finalRepairGrace: 2,
   decayPerSecond: 2,
   finalDecayPerSecond: 3,
-  repairContaminationChange: -1.3,
+  repairContaminationChange: -3,
   flashlightDrainPerSecond: 10,
   flashlightRecoverPerSecond: 10,
   flashlightRepelSeconds: 0.65,
@@ -2808,11 +2808,11 @@ const DAY3_BALANCE = {
   attackWaitSeconds: 20,
   attackPressureMultiplier: 2,
   attackRollSeconds: 1,
-  attackRollChance: 0.33,
-  flashlightPanicDashChance: 0.5,
+  attackRollChance: 0.2,
+  flashlightPanicDashChance: 0.4,
   viewTransitionMs: 1150,
   adReturnChanceMin: 0.02,
-  adReturnChanceMax: 0.36,
+  adReturnChanceMax: 0.3,
   adReturnRampMs: 30000,
 };
 
