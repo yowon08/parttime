@@ -6,6 +6,30 @@ import { DAY3_TEXT } from "./day3Text.js";
 import { DAY_CLEAR_LINES } from "./dayClearLines.js";
 import "./styles.css";
 
+const PUBLIC_IMAGE_FILES = import.meta.glob("/public/**/*.{png,jpg,jpeg,webp}", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+
+function sortByAssetNumber(a, b) {
+  const getNumber = (value) => Number(String(value).match(/\/(\d+)(?:\.[^/.?]+)(?:\?|$)/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+  const aNumber = getNumber(a);
+  const bNumber = getNumber(b);
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return String(a).localeCompare(String(b), undefined, { numeric: true });
+}
+
+function listPublicImages(prefix) {
+  return Object.values(PUBLIC_IMAGE_FILES)
+    .filter((src) => String(src).startsWith(prefix))
+    .sort(sortByAssetNumber);
+}
+
+function uniqueAssets(list) {
+  return Array.from(new Set(list.filter(Boolean)));
+}
+
 const CCTV_FRAMES = Array.from({ length: 12 }, (_, index) => `/cctv/frame_${String(index + 1).padStart(2, "0")}.png`);
 const AUDIO = {
   bgm: "/songs/bgm.mp3",
@@ -88,12 +112,8 @@ const DAY3_LONG_SOUNDS = Object.values(
 );
 const DAY3_JUMP_FRAMES = Object.values(
   import.meta.glob("/public/repair/jump/*.{png,jpg,jpeg,webp}", { eager: true, query: "?url", import: "default" })
-).sort((a, b) => {
-  const aNumber = Number(String(a).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? 0);
-  const bNumber = Number(String(b).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? 0);
-  return aNumber - bNumber;
-});
-const DAY3_AD_IMAGES = Array.from({ length: 4 }, (_, index) => `/ad/${index + 1}.png`);
+).sort(sortByAssetNumber);
+const DAY3_AD_IMAGES = listPublicImages("/ad/");
 const DAY3_ENDING_SCRIPTS = {
   ending1: [
     "수고하셨습니다.",
@@ -130,15 +150,9 @@ const DEFAULT_CUSTOM_SETTINGS = {
   day2Sedatives: 8,
   day3RepairPerSecond: 9,
 };
-const DAY2_IMAGES = {
-  1: "/sal/1.png",
-  2: "/sal/2.png",
-  3: "/sal/3.png",
-  4: "/sal/4.png",
-  5: "/sal/5.png",
-  6: "/sal/6.png",
-};
-const DAY2_JUMP_FRAMES = Array.from({ length: 6 }, (_, index) => `/sal/jump/${index + 1}.png`);
+const DAY2_BASE_IMAGES = listPublicImages("/sal/").filter((src) => !String(src).includes("/jump/"));
+const DAY2_IMAGES = Object.fromEntries(DAY2_BASE_IMAGES.map((src, index) => [index + 1, src]));
+const DAY2_JUMP_FRAMES = listPublicImages("/sal/jump/");
 const DAY2_SOUND_TESTS = ["/sal/songs/1.mp3", "/sal/songs/2.mp3", "/sal/songs/3.mp3"];
 const DAY2_TASKS = ["혈액 채취", "조직 채취", "호흡 확인", "반응 검사"];
 let introVoiceIndex = 0;
@@ -224,9 +238,12 @@ if (gCamera) {
   });
 }
 
-const PRELOAD_IMAGES = [
+const COMMON_ELEVATOR_IMAGES = listPublicImages("/ev/");
+const DAY1_PRELOAD_IMAGES = uniqueAssets([
+  ...listPublicImages("/cameras/"),
+  ...listPublicImages("/cctv/"),
   ...CCTV_FRAMES,
-  ELEVATOR_IMAGE,
+  ...COMMON_ELEVATOR_IMAGES,
   ...CAMERAS.flatMap((camera) => [
     camera.image,
     ...camera.anomalies.flatMap((anomaly) => [
@@ -236,7 +253,20 @@ const PRELOAD_IMAGES = [
       ...(anomaly.gRunFrames ?? []),
     ]),
   ]),
-].filter(Boolean);
+]);
+const DAY2_PRELOAD_IMAGES = uniqueAssets([
+  ...COMMON_ELEVATOR_IMAGES,
+  ...Object.values(DAY2_IMAGES),
+  ...DAY2_JUMP_FRAMES,
+]);
+const DAY3_PRELOAD_IMAGES = uniqueAssets([
+  ...COMMON_ELEVATOR_IMAGES,
+  ...listPublicImages("/repair/"),
+  ...DAY3_JUMP_FRAMES,
+  ...DAY3_AD_IMAGES,
+  ...DAY3_ENDING_IMAGES,
+]);
+const PRELOAD_IMAGES = DAY1_PRELOAD_IMAGES;
 
 const REPORT_TEXTS = ["수습 중...", "현장 확인 중...", "격리반 호출 중...", "인지재해 차단 중...", "보고서 대조 중...", "프로토콜 적용 중..."];
 const WARNING_TEXTS = ["문제 보고 실패.", "관측 누락 기록됨.", "비인가 현상 확산 중.", "프로토콜 지연 감지.", "관측자 오류율 상승."];
@@ -283,6 +313,22 @@ function preloadImage(src) {
 
   PRELOADED_IMAGE_CACHE.set(src, { image, ready: false, promise });
   return promise;
+}
+
+function preloadImagesWithProgress(sources, onProgress) {
+  const uniqueSources = uniqueAssets(sources);
+  if (!uniqueSources.length) {
+    onProgress?.(1);
+    return Promise.resolve();
+  }
+
+  let loaded = 0;
+  const completeOne = () => {
+    loaded += 1;
+    onProgress?.(loaded / uniqueSources.length);
+  };
+
+  return Promise.all(uniqueSources.map((src) => preloadImage(src).then(completeOne, completeOne))).then(() => undefined);
 }
 
 function getTimeText(seconds) {
@@ -762,7 +808,6 @@ function DayOneGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
 
   useEffect(() => {
     let cancelled = false;
-    let loaded = 0;
 
     evOnRef.current && (evOnRef.current.volume = 0.55);
     evRideRef.current && (evRideRef.current.volume = 0.32);
@@ -770,37 +815,13 @@ function DayOneGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
     evOnRef.current?.play().catch(() => {});
     evRideRef.current?.play().catch(() => {});
 
-    const completeOne = () => {
+    preloadImagesWithProgress(PRELOAD_IMAGES, (loadProgress) => {
       if (cancelled) return;
-      loaded += 1;
-      const loadProgress = loaded / PRELOAD_IMAGES.length;
       setIntroProgress(Math.min(0.98, loadProgress));
-
-      if (loaded < PRELOAD_IMAGES.length) return;
-      setIntroProgress(1);
-      setIntroAssetsLoaded(true);
-    };
-
-    PRELOAD_IMAGES.forEach((src) => {
-      const image = new Image();
-      let completed = false;
-
-      const finish = () => {
-        if (completed) return;
-        completed = true;
-        completeOne();
-      };
-
-      image.onload = async () => {
-        try {
-          if (image.decode) await image.decode();
-        } catch {
-          // decode() can reject on some browsers even when the image is usable.
-        }
-        finish();
-      };
-      image.onerror = finish;
-      image.src = src;
+      if (loadProgress >= 1) {
+        setIntroProgress(1);
+        setIntroAssetsLoaded(true);
+      }
     });
 
     return () => {
@@ -1882,6 +1903,8 @@ function DayOneGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
 
 function DayTwoGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
   const [introReady, setIntroReady] = useState(false);
+  const [introProgress, setIntroProgress] = useState(0);
+  const [introAssetsLoaded, setIntroAssetsLoaded] = useState(false);
   const [introLineIndex, setIntroLineIndex] = useState(0);
   const [introExiting, setIntroExiting] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
@@ -1977,6 +2000,19 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    preloadImagesWithProgress(DAY2_PRELOAD_IMAGES, (progress) => {
+      if (cancelled) return;
+      setIntroProgress(progress);
+      if (progress >= 1) setIntroAssetsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!introAssetsLoaded) return undefined;
     const timer = setInterval(() => {
       setIntroLineIndex((index) => {
         if (index >= DAY2_INTRO_LINES.length - 1) {
@@ -1989,7 +2025,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
     }, INTRO_LINE_DURATION);
     introTimer.current = timer;
     return () => clearInterval(timer);
-  }, []);
+  }, [introAssetsLoaded]);
 
   useEffect(() => {
     evOnRef.current && (evOnRef.current.volume = 0.55);
@@ -2571,10 +2607,13 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
       {!gameStarted && (
         <ElevatorIntro
           ready={introReady}
-          progress={1}
-          line={!introReady ? DAY2_INTRO_LINES[introLineIndex] : ""}
+          progress={introProgress}
+          line={introAssetsLoaded && !introReady ? DAY2_INTRO_LINES[introLineIndex] : ""}
           onEnter={enterDay2}
-          onSkip={() => setIntroReady(true)}
+          onSkip={() => {
+            setIntroLineIndex(DAY2_INTRO_LINES.length - 1);
+            if (introAssetsLoaded) setIntroReady(true);
+          }}
           exiting={introExiting}
         />
       )}
@@ -2902,6 +2941,8 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   const [phase, setPhase] = useState("introElevator");
   const [scriptIndex, setScriptIndex] = useState(0);
   const [day3IntroReady, setDay3IntroReady] = useState(false);
+  const [day3IntroProgress, setDay3IntroProgress] = useState(0);
+  const [day3AssetsLoaded, setDay3AssetsLoaded] = useState(false);
   const [day3IntroExiting, setDay3IntroExiting] = useState(false);
   const [day3GameFadingIn, setDay3GameFadingIn] = useState(false);
   const [view, setView] = useState("center");
@@ -2918,6 +2959,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   const [ad, setAd] = useState(null);
   const [adCanSkip, setAdCanSkip] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
+  const [day3DeveloperVisible, setDay3DeveloperVisible] = useState(false);
   const [message, setMessage] = useState("안내를 확인하십시오.");
   const [gameover, setGameover] = useState(null);
   const [endingStarted, setEndingStarted] = useState(false);
@@ -2974,6 +3016,8 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
     setPhase("introElevator");
     setScriptIndex(0);
     setDay3IntroReady(false);
+    setDay3IntroProgress(0);
+    setDay3AssetsLoaded(false);
     setDay3IntroExiting(false);
     setDay3GameFadingIn(false);
     setView("center");
@@ -2990,6 +3034,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
     setAd(null);
     setAdCanSkip(false);
     setHudVisible(true);
+    setDay3DeveloperVisible(false);
     setMessage("안내를 확인하십시오.");
     setGameover(null);
     setEndingStarted(false);
@@ -3023,6 +3068,18 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   useEffect(() => {
     return () => clearTimeout(endingTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    preloadImagesWithProgress(DAY3_PRELOAD_IMAGES, (progress) => {
+      if (cancelled) return;
+      setDay3IntroProgress(progress);
+      if (progress >= 1) setDay3AssetsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resetSeed]);
 
   function playDay3Effect(src, volume = 0.45) {
     if (!src) return null;
@@ -3262,7 +3319,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
 
   function skipDay3Intro() {
     setScriptIndex(DAY3_TEXT.intro.length - 1);
-    setDay3IntroReady(true);
+    if (day3AssetsLoaded) setDay3IntroReady(true);
   }
 
   function triggerDay3Blackout() {
@@ -3759,10 +3816,10 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   }, [endingComplete]);
 
   useEffect(() => {
-    if (phase !== "introElevator" || day3IntroReady || scriptIndex < DAY3_TEXT.intro.length - 1) return undefined;
+    if (phase !== "introElevator" || day3IntroReady || !day3AssetsLoaded || scriptIndex < DAY3_TEXT.intro.length - 1) return undefined;
     const timer = setTimeout(() => setDay3IntroReady(true), 2600);
     return () => clearTimeout(timer);
-  }, [day3IntroReady, phase, scriptIndex]);
+  }, [day3AssetsLoaded, day3IntroReady, phase, scriptIndex]);
 
   useEffect(() => {
     if (phase !== "radioAttack" || scriptIndex < DAY3_TEXT.radioAttack.length - 1) return undefined;
@@ -3824,7 +3881,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
       }
       if (key === "o") {
         event.preventDefault();
-        if (!event.repeat) setHudVisible((visible) => !visible);
+        if (!event.repeat) setDay3DeveloperVisible((visible) => !visible);
         return;
       }
       if (phase === "introElevator" && key === "enter") {
@@ -4031,7 +4088,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
       {phase === "introElevator" ? (
         <ElevatorIntro
           ready={day3IntroReady}
-          progress={day3IntroReady ? 1 : scriptIndex / Math.max(1, DAY3_TEXT.intro.length - 1)}
+          progress={day3IntroReady ? 1 : day3IntroProgress}
           line={!day3IntroReady ? activeScriptText : ""}
           onEnter={enterFacility}
           onSkip={skipDay3Intro}
@@ -4053,14 +4110,16 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
             ))}
           </aside>
 
-          <aside className="day3-right-hud">
-            <strong>상태</strong>
-            <span>정신오염도 {Math.round(contamination)} / 100</span>
-            <span>{contaminationLabel}</span>
-            <span>DEV 괴물 위치: {monsterPositionLabel}</span>
-            <span>좌측: {leftCue}</span>
-            <span>우측: {rightCue}</span>
-          </aside>
+          {day3DeveloperVisible && (
+            <aside className="day3-right-hud">
+              <strong>상태</strong>
+              <span>정신오염도 {Math.round(contamination)} / 100</span>
+              <span>{contaminationLabel}</span>
+              <span>DEV 괴물 위치: {monsterPositionLabel}</span>
+              <span>좌측: {leftCue}</span>
+              <span>우측: {rightCue}</span>
+            </aside>
+          )}
 
           <nav className="day3-nav">
             <button type="button" onClick={() => moveView("left")} disabled={controlsLocked}>A 좌측</button>
