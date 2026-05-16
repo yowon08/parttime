@@ -26,22 +26,22 @@ const AUDIO = {
   dayClear2: "/songs/dayclear2.mp3",
 };
 const CONFIG = {
-  BGM_VOLUME: 0.28,
-  VHS_VOLUME: 0.24,
-  SIGNAL_NOISE_VOLUME: 0.08,
-  CLEAR_TIME_SECONDS: 480,
-  CLEAR_TIME_MINUTES: 360,
-  DAY_ONE_REPORT_TIME_BONUS_SECONDS: 20,
-  LINGER_AMBUSH_DELAY: 8000,
-  REBOOT_CHECK_INTERVAL: 8000,
-  INTRO_LINE_DURATION: 3000,
-  INTRO_DIALOGUE_DELAY: 3000,
-  INTRO_SKIP_ARRIVAL_DELAY: 2000,
-  REAR_PANEL_CLOSE_DURATION: 520,
-  G_RUN_CLEAR_DELAY: 3000,
-  G_RUN_FINAL_GRACE: 450,
-  G_RUN_FRAME_DURATION: 145,
-  FADE_DURATION_DEFAULT: 500,
+  BGM_VOLUME: 0.28, // 1일차 기본 배경음 볼륨
+  VHS_VOLUME: 0.24, // 1일차 CCTV가 켜져 있을 때 VHS 노이즈 볼륨
+  SIGNAL_NOISE_VOLUME: 0.08, // 1일차 신호 오류 화면에서 반복되는 노이즈 볼륨
+  CLEAR_TIME_SECONDS: 480, // 1일차 실제 플레이 클리어 시간(초). 480초 = 8분
+  CLEAR_TIME_MINUTES: 360, // 1일차 게임 내 시간 진행량(분). 360분 = 12시~6시
+  DAY_ONE_REPORT_TIME_BONUS_SECONDS: 20, // 1일차 이상현상 보고 성공 시 추가로 흘려보내는 시간(초)
+  LINGER_AMBUSH_DELAY: 8000, // 1일차 한 카메라를 오래 볼 때 강제 이상현상이 뜨기까지의 시간(ms)
+  REBOOT_CHECK_INTERVAL: 8000, // 1일차 CCTV 신호 오류 발생 여부를 다시 굴리는 주기(ms)
+  INTRO_LINE_DURATION: 3000, // 엘리베이터/안내 자막 한 줄 기본 표시 시간(ms)
+  INTRO_DIALOGUE_DELAY: 3000, // 이미지 로딩 후 안내 자막 시작 전 뜸 들이는 시간(ms)
+  INTRO_SKIP_ARRIVAL_DELAY: 2000, // 오프닝 스킵 후 도착까지 기다리는 시간(ms)
+  REAR_PANEL_CLOSE_DURATION: 520, // 1/2일차 패널이 내려가는 애니메이션 시간(ms)
+  G_RUN_CLEAR_DELAY: 3000, // 1일차 G캠 달려오는 이벤트를 보고 후 정리하는 시간(ms)
+  G_RUN_FINAL_GRACE: 450, // 1일차 G캠 마지막 프레임 도달 후 보고 가능한 유예 시간(ms)
+  G_RUN_FRAME_DURATION: 145, // 1일차 G캠 달려오는 이벤트 프레임 전환 속도(ms)
+  FADE_DURATION_DEFAULT: 500, // 공통 오디오 페이드 기본 시간(ms)
 };
 const BGM_VOLUME = CONFIG.BGM_VOLUME;
 const VHS_VOLUME = CONFIG.VHS_VOLUME;
@@ -93,7 +93,14 @@ const DAY3_JUMP_FRAMES = Object.values(
   const bNumber = Number(String(b).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? 0);
   return aNumber - bNumber;
 });
-const DAY3_AD_IMAGES = Array.from({ length: 4 }, (_, index) => `/ad/${index + 1}.png`);
+const DAY3_AD_IMAGES = Object.values(
+  import.meta.glob("/public/ad/*.{png,jpg,jpeg,webp}", { eager: true, query: "?url", import: "default" })
+).sort((a, b) => {
+  const aNumber = Number(String(a).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+  const bNumber = Number(String(b).match(/\/(\d+)\.[^/.]+(?:\?|$)/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return String(a).localeCompare(String(b));
+});
 const DAY3_ENDING_SCRIPTS = {
   ending1: [
     "수고하셨습니다.",
@@ -122,8 +129,18 @@ const DAY3_ENDING_SCRIPTED_SEQUENCE = [
 ];
 const DAY_COUNT = 3;
 const IMPLEMENTED_DAYS = 3;
-const DEFAULT_UNLOCKED_DAY = 3;
+const DEFAULT_UNLOCKED_DAY = 1;
 const SAVE_KEY = "analog-observation-unlocked-day";
+const LAST_DAY_KEY = "analog-observation-last-day";
+const DEFAULT_CUSTOM_SETTINGS = {
+  day1RebootCheckInterval: REBOOT_CHECK_INTERVAL,
+  day1ClearTimeSeconds: CLEAR_TIME_SECONDS,
+  day1ReportTimeBonusSeconds: DAY_ONE_REPORT_TIME_BONUS_SECONDS,
+  day1LingerAmbushDelay: LINGER_AMBUSH_DELAY,
+  day2Sedatives: 8,
+  day3RepairPerSecond: 9,
+  day3Balance: {},
+};
 const DAY2_IMAGES = {
   1: "/sal/1.png",
   2: "/sal/2.png",
@@ -627,7 +644,7 @@ function useGameAudio() {
   return { fadeTimers, fadeAudio, applyIntroVoiceEffect, disconnectIntroVoiceEffect };
 }
 
-function DayOneGame({ onReturnToMenu, onCompleteDay }) {
+function DayOneGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
   const [gameStarted, setGameStarted] = useState(false);
   const [introReady, setIntroReady] = useState(false);
   const [introProgress, setIntroProgress] = useState(0);
@@ -722,6 +739,10 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   const timeText = getTimeText(seconds);
   const showCctvHud = cctvOpen && !turnedBack && !monitorMotion;
   const cam11JumpscareLoopActive = anomalyCam !== null && CAMERAS[anomalyCam]?.offline && anomalyEscalated;
+  const rebootCheckInterval = customSettings?.day1RebootCheckInterval ?? REBOOT_CHECK_INTERVAL;
+  const day1ClearTimeSeconds = customSettings?.day1ClearTimeSeconds ?? CLEAR_TIME_SECONDS;
+  const day1ReportTimeBonusSeconds = customSettings?.day1ReportTimeBonusSeconds ?? DAY_ONE_REPORT_TIME_BONUS_SECONDS;
+  const day1LingerAmbushDelay = customSettings?.day1LingerAmbushDelay ?? LINGER_AMBUSH_DELAY;
 
   useEffect(() => {
     return () => {
@@ -1038,7 +1059,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   }, [cameraStress]);
 
   useEffect(() => {
-    if (!gameStarted || seconds < CLEAR_TIME_SECONDS || dead || cleared) return;
+    if (!gameStarted || seconds < day1ClearTimeSeconds || dead || cleared) return;
     clearTimeout(overlayTimer.current);
     setCleared(true);
     setClearBridgeDone(false);
@@ -1052,7 +1073,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
     setOverlay(null);
     fadeAudio(vhsRef.current, 0, 500, { pauseAfter: true });
     fadeAudio(bgmRef.current, BGM_VOLUME, 900, { playBefore: true });
-  }, [gameStarted, seconds, dead, cleared]);
+  }, [gameStarted, seconds, dead, cleared, day1ClearTimeSeconds]);
 
   useEffect(() => {
     if (!cleared || !clearBridgeDone || dead) return undefined;
@@ -1142,9 +1163,9 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
         cameraStressRef.current = nextStress;
         return nextStress;
       });
-    }, REBOOT_CHECK_INTERVAL);
+    }, rebootCheckInterval);
     return () => clearInterval(timer);
-  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, ambushPending, anomalyCam, overlay, monitorMotion, cctvOpen]);
+  }, [gameStarted, dead, cleared, rebootRequired, signalFailure, ambushPending, anomalyCam, overlay, monitorMotion, cctvOpen, rebootCheckInterval]);
 
   useEffect(() => {
     if (warnings >= 3 && !dead) {
@@ -1193,7 +1214,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
         setTurnedBack(false);
         setRebootRequired(false);
         setSignalFailure(false);
-        setSeconds(CLEAR_TIME_SECONDS - 1);
+        setSeconds(day1ClearTimeSeconds - 1);
         return;
       }
 
@@ -1291,10 +1312,10 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
 
     lingerTimer.current = setTimeout(() => {
       scheduleAmbush(camIndex, 0);
-    }, LINGER_AMBUSH_DELAY);
+    }, day1LingerAmbushDelay);
 
     return () => clearTimeout(lingerTimer.current);
-  }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam]);
+  }, [showCctvHud, camIndex, currentCam.forceAmbushDisabled, dead, cleared, rebootRequired, signalFailure, overlay, anomalyCam, day1LingerAmbushDelay]);
 
   useEffect(() => {
     clearTimeout(escalationTimer.current);
@@ -1603,7 +1624,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
         setGRunRedout(false);
         setGRunThump(false);
         setCompletedReports((count) => count + 1);
-        setSeconds((time) => Math.min(CLEAR_TIME_SECONDS, time + DAY_ONE_REPORT_TIME_BONUS_SECONDS));
+        setSeconds((time) => Math.min(day1ClearTimeSeconds, time + day1ReportTimeBonusSeconds));
       });
     } else {
       showOverlay("warning", "오보고 기록됨.", 1100, () => {
@@ -1873,7 +1894,7 @@ function DayOneGame({ onReturnToMenu, onCompleteDay }) {
   );
 }
 
-function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
+function DayTwoGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
   const [introReady, setIntroReady] = useState(false);
   const [introLineIndex, setIntroLineIndex] = useState(0);
   const [introExiting, setIntroExiting] = useState(false);
@@ -1884,14 +1905,15 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const [clearBridgeDone, setClearBridgeDone] = useState(false);
   const [endingLineIndex, setEndingLineIndex] = useState(0);
   const [endingFading, setEndingFading] = useState(false);
+  const [menuFading, setMenuFading] = useState(false);
   const [dead, setDead] = useState(false);
   const [jumpIndex, setJumpIndex] = useState(null);
   const [stage, setStage] = useState(1);
   const [visibleStage, setVisibleStage] = useState(1);
-  const [danger, setDanger] = useState(0);
+  const [danger, setDanger] = useState(0); // 2일차 이상행동 게이지. 높을수록 1->2->3단계로 진행
   const [deathArmed, setDeathArmed] = useState(false);
   const [forceDeath, setForceDeath] = useState(false);
-  const [sedatives, setSedatives] = useState(8);
+  const [sedatives, setSedatives] = useState(() => customSettings?.day2Sedatives ?? 8); // 2일차 진정제 총 사용 가능 횟수
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [taskPanelClosing, setTaskPanelClosing] = useState(false);
   const [taskProgress, setTaskProgress] = useState([0, 0, 0, 0]);
@@ -1929,7 +1951,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
   const clearTimer = useRef(null);
   const endingTimer = useRef(null);
   const jumpTimer = useRef(null);
-  const panelExposureRef = useRef(0);
+  const panelExposureRef = useRef(0); // 2일차 패널을 오래 열수록 위험 상승량을 키우는 누적값
   const bgmRef = useRef(null);
   const soundRef = useRef(null);
   const jumpAudioRef = useRef(null);
@@ -2025,10 +2047,10 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     const panelActive = taskPanelOpen || reportPanelOpen;
     const timer = setInterval(() => {
       panelExposureRef.current = panelActive ? panelExposureRef.current + 1 : Math.max(0, panelExposureRef.current - 1.5);
-      const exposureMax = panelActive ? Math.min(30, 4 + 2.3 * Math.pow(1.18, panelExposureRef.current / 2.6)) : 0;
-      const minIncrease = audioPlaying ? 1.2 : 0.4;
-      const maxIncrease = panelActive ? exposureMax + (audioPlaying ? 4 : 0) : audioPlaying ? 7 : holdTask !== null ? 4.5 : 2.4;
-      const increase = randomBetween(minIncrease, maxIncrease);
+      const exposureMax = panelActive ? Math.min(30, 4 + 2.3 * Math.pow(1.18, panelExposureRef.current / 2.6)) : 0; // 2일차 패널을 오래 열수록 이상행동 상승 최댓값이 커지는 정도
+      const minIncrease = audioPlaying ? 1.2 : 0.4; // 2일차 매초 이상행동 최소 상승량. 음성 재생 중이면 더 높음
+      const maxIncrease = panelActive ? exposureMax + (audioPlaying ? 4 : 0) : audioPlaying ? 7 : holdTask !== null ? 4.5 : 2.4; // 2일차 상황별 이상행동 최대 상승량
+      const increase = randomBetween(minIncrease, maxIncrease); // 2일차 실제로 이번 1초에 오르는 이상행동 난수
       setDanger((value) => {
         const nextDanger = Math.min(100, value + increase);
         const currentStage = getDay2StageFromDanger(value);
@@ -2057,7 +2079,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
         }
         return nextDanger;
       });
-    }, 1000);
+    }, 1000); // 2일차 이상행동 게이지가 갱신되는 주기(ms)
     dangerTimer.current = timer;
     return () => clearInterval(timer);
   }, [
@@ -2084,7 +2106,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
 
   useEffect(() => {
     if (stage < 3 || deathArmed || dead || cleared) return undefined;
-    const timer = setTimeout(() => setDeathArmed(true), 9000);
+    const timer = setTimeout(() => setDeathArmed(true), 9000); // 2일차 3단계 도달 후 사망 판정이 준비되기까지의 시간(ms)
     deathTimer.current = timer;
     return () => clearTimeout(timer);
   }, [stage, deathArmed, dead, cleared]);
@@ -2093,11 +2115,11 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
     if (!gameStarted || dead || cleared || phase === "clear" || deathArmed || rearView || specialPending || specialView || specialTooLate) return undefined;
 
     const timer = setInterval(() => {
-      if (Math.random() > 0.24) return;
+      if (Math.random() > 0.24) return; // 2일차 무작위로 즉시 3단계가 되는 이벤트 확률
       setDanger(100);
       setStage(3);
       if (panelVisible && !specialArmed) setVisibleStage(3);
-    }, 20000);
+    }, 20000); // 2일차 즉시 3단계 이벤트를 다시 굴리는 주기(ms)
 
     suddenStageTimer.current = timer;
     return () => clearInterval(timer);
@@ -2105,7 +2127,7 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
 
   useEffect(() => {
     if (!deathArmed || dead || cleared) return undefined;
-    const timer = setTimeout(() => setForceDeath(true), 10000);
+    const timer = setTimeout(() => setForceDeath(true), 10000); // 2일차 사망 판정 후 버티면 강제로 점프스케어가 나는 시간(ms)
     forceDeathTimer.current = timer;
     return () => clearTimeout(timer);
   }, [deathArmed, dead, cleared]);
@@ -2125,14 +2147,14 @@ function DayTwoGame({ onReturnToMenu, onCompleteDay }) {
 
   useEffect(() => {
     if (!gameStarted || dead || cleared || phase === "clear" || specialArmed || specialPending || specialView || specialTooLate) return undefined;
-    const timer = setTimeout(() => setSpecialArmed(true), 16000 + Math.random() * 12000);
+    const timer = setTimeout(() => setSpecialArmed(true), 16000 + Math.random() * 12000); // 2일차 뒤돌기 특수 이벤트가 준비되는 랜덤 시간(ms)
     specialTimer.current = timer;
     return () => clearTimeout(timer);
   }, [gameStarted, dead, cleared, phase, specialArmed, specialPending, specialView, specialTooLate]);
 
   useEffect(() => {
     if (!specialTooLate || dead || cleared) return undefined;
-    const timer = setTimeout(() => triggerDay2Death(), 5000);
+    const timer = setTimeout(() => triggerDay2Death(), 5000); // 2일차 너무 늦게 뒤돌았을 때 점프스케어까지의 시간(ms)
     return () => clearTimeout(timer);
   }, [specialTooLate, dead, cleared]);
 
@@ -2796,29 +2818,28 @@ const DAY3_ENDING_LINES = [
 ];
 
 const DAY3_BALANCE = {
-  repairPerSecond: 9,
-  finalRepairPerSecond: 6.5,
-  repairGrace: 4,
-  finalRepairGrace: 2,
-  decayPerSecond: 2,
-  finalDecayPerSecond: 3,
-  repairContaminationChange: -3,
-  flashlightDrainPerSecond: 10,
-  flashlightRecoverPerSecond: 10,
-  flashlightRepelSeconds: 0.65,
-  monsterStepSeconds: 5.4,
-  repairMonsterBonus: 2,
-  attackTimerMin: 10,
-  attackTimerMax: 15,
-  attackWaitSeconds: 20,
-  attackPressureMultiplier: 2,
-  attackRollSeconds: 1,
-  attackRollChance: 0.2,
-  flashlightPanicDashChance: 0.4,
-  viewTransitionMs: 1150,
-  adReturnChanceMin: 0.02,
-  adReturnChanceMax: 0.3,
-  adReturnRampMs: 30000,
+  repairPerSecond: 9, // 3일차 일반 수리 진행 속도(%/초)
+  finalRepairPerSecond: 6.5, // 3일차 8단계 수리 진행 속도(%/초)
+  repairGrace: 4, // 3일차 수리 중단 후 진행률 감소가 시작되기 전 유예 시간(초)
+  finalRepairGrace: 2, // 3일차 8단계에서 수리 중단 후 진행률 감소 유예 시간(초)
+  decayPerSecond: 2, // 3일차 일반 단계에서 수리 중단 후 진행률 감소 속도(%/초)
+  finalDecayPerSecond: 3, // 3일차 8단계에서 수리 중단 후 진행률 감소 속도(%/초)
+  repairContaminationChange: -3, // 3일차 수리 중 정신침식 변화량. 음수면 수리 중 오염이 감소
+  flashlightRepelSeconds: 0.65, // 3일차 손전등을 같은 방향에 비춰야 괴물이 밀려나는 시간(초)
+  monsterStepSeconds: 5.4, // 3일차 괴물이 자연 이동을 시도하는 기본 주기(초)
+  repairMonsterBonus: 2, // 3일차 수리 중 괴물 이동 주기를 얼마나 앞당길지(초)
+  attackTimerMin: 10, // 3일차 근접 대기/공격 관련 최소 시간 기준(초)
+  attackTimerMax: 15, // 3일차 근접 대기/공격 관련 최대 시간 기준(초)
+  attackWaitSeconds: 20, // 3일차 a3/b3 근접 위치에서 공격 판정이 시작되기 전 대기 시간(초)
+  attackPressureMultiplier: 2, // 3일차 수리 중이거나 반대편을 볼 때 공격 대기 시간이 빨리 줄어드는 배율
+  attackRollSeconds: 1, // 3일차 공격 대기 시간이 끝난 뒤 공격 확률을 굴리는 주기(초)
+  attackRollChance: 0.2, // 3일차 공격 판정 주기마다 실제 게임오버가 날 확률
+  flashlightPanicDashChance: 0.4, // 3일차 손전등을 맞은 괴물이 반대편 근접 위치로 뛰는 확률
+  viewTransitionMs: 1150, // 3일차 좌/우에서 중앙으로 돌아온 뒤 광고 판정을 굴리기까지의 시간(ms)
+  adReturnChanceMin: 0.02, // 3일차 광고가 막 나온 직후의 최소 광고 재등장 확률
+  adReturnChanceMax: 0.3, // 3일차 시간이 지난 뒤 도달하는 최대 광고 재등장 확률
+  adReturnRampMs: 30000, // 3일차 광고 재등장 확률이 최소에서 최대로 올라가는 시간(ms)
+  maxAdCount: 4, // 3일차 하루 동안 송출되는 광고 최대 횟수
 };
 
 const DAY3_MONSTER_GRAPH = {
@@ -2872,7 +2893,7 @@ function getDay3NaturalMoveOptions(position) {
   return DAY3_MONSTER_GRAPH[position] ?? ["M"];
 }
 
-  function DayThreeGame({ onReturnToMenu, onCompleteDay }) {
+function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) {
   // 기존 상태들 (예: gameStarted, seconds 등) 유지...
   
   // [수정 1] 플레이어 시야 상태 (-1: 좌, 0: 중앙, 1: 우)
@@ -2903,7 +2924,6 @@ function getDay3NaturalMoveOptions(position) {
   const [stageProgress, setStageProgress] = useState(0);
   const [completedStages, setCompletedStages] = useState(() => Array(8).fill(false));
   const [contamination, setContamination] = useState(8);
-  const [flashlightStability, setFlashlightStability] = useState(100);
   const [monsterPosition, setMonsterPosition] = useState("M");
   const [monsters, setMonsters] = useState({ left: 0, right: 0 });
   const [attackTimers, setAttackTimers] = useState({ left: null, right: null });
@@ -2913,6 +2933,7 @@ function getDay3NaturalMoveOptions(position) {
   const [ad, setAd] = useState(null);
   const [adCanSkip, setAdCanSkip] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
+  const [devVisible, setDevVisible] = useState(false);
   const [message, setMessage] = useState("안내를 확인하십시오.");
   const [gameover, setGameover] = useState(null);
   const [endingStarted, setEndingStarted] = useState(false);
@@ -2976,7 +2997,6 @@ function getDay3NaturalMoveOptions(position) {
     setStageProgress(0);
     setCompletedStages(Array(8).fill(false));
     setContamination(8);
-    setFlashlightStability(100);
     setMonsterPosition("M");
     setMonsters({ left: 0, right: 0 });
     setAttackTimers({ left: null, right: null });
@@ -2986,6 +3006,7 @@ function getDay3NaturalMoveOptions(position) {
     setAd(null);
     setAdCanSkip(false);
     setHudVisible(true);
+    setDevVisible(false);
     setMessage("안내를 확인하십시오.");
     setGameover(null);
     setEndingStarted(false);
@@ -3009,7 +3030,9 @@ function getDay3NaturalMoveOptions(position) {
   const darkMode = ["blackout", "playing", "clearBridge", "ending", "gameover"].includes(phase);
   const controlsLocked = Boolean(ad) || phase === "introElevator" || phase === "adInfo" || phase === "radioAttack" || phase === "blackout" || phase === "clearBridge" || phase === "ending" || Boolean(gameover);
   const canRepair = !controlsLocked && (phase === "tutorialRepair" || phase === "playing") && view === "center";
-  const canFlashlight = !controlsLocked && ["tutorial", "tutorialRepair", "playing"].includes(phase) && view !== "center" && flashlightStability > 0;
+  const canFlashlight = !controlsLocked && ["tutorial", "tutorialRepair", "playing"].includes(phase) && view !== "center";
+  const day3Balance = { ...DAY3_BALANCE, ...(customSettings?.day3Balance ?? {}) };
+  const repairPerSecond = customSettings?.day3RepairPerSecond ?? day3Balance.repairPerSecond;
 
   useEffect(() => {
     return () => clearTimeout(returnAdTimerRef.current);
@@ -3136,7 +3159,7 @@ function getDay3NaturalMoveOptions(position) {
     const level = getDay3MonsterLevel(monsterPosition);
     if (currentSide !== side || level < 1 || monsterMovingRef.current) return;
 
-    const panicDashPath = level < 4 && Math.random() < DAY3_BALANCE.flashlightPanicDashChance
+    const panicDashPath = level < 4 && Math.random() < day3Balance.flashlightPanicDashChance
       ? getDay3FlashlightPanicDashPath(monsterPosition)
       : null;
     if (panicDashPath) {
@@ -3188,7 +3211,13 @@ function getDay3NaturalMoveOptions(position) {
     audio.play().catch(() => {});
   }
 
-  function startAd(index, nextPhase = "playing") {
+  function startAd(index = 0, nextPhase = "playing") {
+    if (usedAdImagesRef.current.size >= day3Balance.maxAdCount) {
+      setPhase(nextPhase);
+      setMessage("광고 송출 가능 횟수 소진. 절차를 계속합니다.");
+      return;
+    }
+
     adShownRef.current.add(index);
     lastAdAtRef.current = Date.now();
     const remainingAds = DAY3_AD_IMAGES.filter((image) => !usedAdImagesRef.current.has(image));
@@ -3396,13 +3425,13 @@ function getDay3NaturalMoveOptions(position) {
 
   function tryRandomReturnAd(previousView, nextView) {
     if (phase !== "playing" || previousView === "center" || nextView !== "center" || ad || gameover) return;
-    const candidates = [1, 2, 3].filter((index) => !adShownRef.current.has(index));
-    if (!candidates.length) return;
+    if (usedAdImagesRef.current.size >= day3Balance.maxAdCount) return;
+    if (usedAdImagesRef.current.size >= DAY3_AD_IMAGES.length) return;
 
-    const ramp = clamp((Date.now() - lastAdAtRef.current) / DAY3_BALANCE.adReturnRampMs, 0, 1);
-    const adChance = DAY3_BALANCE.adReturnChanceMin + (DAY3_BALANCE.adReturnChanceMax - DAY3_BALANCE.adReturnChanceMin) * ramp;
+    const ramp = clamp((Date.now() - lastAdAtRef.current) / day3Balance.adReturnRampMs, 0, 1);
+    const adChance = day3Balance.adReturnChanceMin + (day3Balance.adReturnChanceMax - day3Balance.adReturnChanceMin) * ramp;
     if (Math.random() < adChance) {
-      startAd(randomItem(candidates), "playing");
+      startAd(usedAdImagesRef.current.size + 1, "playing");
     }
   }
 
@@ -3416,7 +3445,7 @@ function getDay3NaturalMoveOptions(position) {
       returnAdTimerRef.current = setTimeout(() => {
         tryRandomReturnAd(previousView, nextView);
         returnAdTimerRef.current = null;
-      }, DAY3_BALANCE.viewTransitionMs);
+      }, day3Balance.viewTransitionMs);
     }
   }
 
@@ -3460,7 +3489,6 @@ function getDay3NaturalMoveOptions(position) {
       return;
     }
     const side = view;
-    setFlashlightStability((value) => clamp(value - DAY3_BALANCE.flashlightCost, 0, 100));
     setFlashPulse(side);
     setTimeout(() => setFlashPulse(null), 260);
 
@@ -3587,10 +3615,6 @@ function getDay3NaturalMoveOptions(position) {
   useEffect(() => {
     if (isRepairing && !canRepair) setIsRepairing(false);
   }, [canRepair, isRepairing]);
-
-  useEffect(() => {
-    if (isFlashlightHeld && !canFlashlight) setIsFlashlightHeld(false);
-  }, [canFlashlight, isFlashlightHeld]);
 
   useEffect(() => {
     syncCloseLoop();
@@ -3824,7 +3848,7 @@ function getDay3NaturalMoveOptions(position) {
       }
       if (key === "o") {
         event.preventDefault();
-        if (!event.repeat) setHudVisible((visible) => !visible);
+        if (!event.repeat) setDevVisible((visible) => !visible);
         return;
       }
       if (phase === "introElevator" && key === "enter") {
@@ -3859,24 +3883,16 @@ function getDay3NaturalMoveOptions(position) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [canRepair, controlsLocked, phase, view, flashlightStability, canFlashlight, isFlashlightHeld]);
+  }, [canRepair, controlsLocked, phase, view, canFlashlight, isFlashlightHeld]);
 
   useEffect(() => {
     if (gameover || phase === "introElevator" || phase === "ending") return undefined;
     const timer = setInterval(() => {
       const dt = 0.2;
 
-      setFlashlightStability((value) => {
-        const next = isFlashlightHeld
-          ? value - DAY3_BALANCE.flashlightDrainPerSecond * dt
-          : value + DAY3_BALANCE.flashlightRecoverPerSecond * dt;
-        if (next <= 0) setIsFlashlightHeld(false);
-        return clamp(next, 0, 100);
-      });
-
       if (phase === "playing") {
         const closeThreat = monsters.left >= 3 || monsters.right >= 3 ? 0.8 : 0;
-        const base = isRepairing ? DAY3_BALANCE.repairContaminationChange : isFlashlightHeld ? 0 : view === "center" ? 0.4 : 1.2;
+        const base = isRepairing ? day3Balance.repairContaminationChange : isFlashlightHeld ? 0 : view === "center" ? 0.4 : 1.2;
         setContamination((value) => {
           const next = clamp(value + (base + closeThreat + (stageIndex === 7 ? 0.35 : 0)) * dt, 0, 100);
           if (next >= 100) triggerGameover("pollution");
@@ -3884,7 +3900,7 @@ function getDay3NaturalMoveOptions(position) {
         });
 
         monsterClockRef.current += dt;
-        const stepTime = Math.max(1.7, DAY3_BALANCE.monsterStepSeconds - (isRepairing ? DAY3_BALANCE.repairMonsterBonus : 0) - stageIndex * 0.22);
+        const stepTime = Math.max(1.7, day3Balance.monsterStepSeconds - (isRepairing ? day3Balance.repairMonsterBonus : 0) - stageIndex * 0.22);
         if (monsterClockRef.current >= stepTime) {
           monsterClockRef.current = 0;
           moveMonsterRandomly();
@@ -3901,7 +3917,7 @@ function getDay3NaturalMoveOptions(position) {
 
         if (isFlashlightHeld && (view === "left" || view === "right")) {
           flashlightRepelClockRef.current += dt;
-          if (flashlightRepelClockRef.current >= DAY3_BALANCE.flashlightRepelSeconds) {
+          if (flashlightRepelClockRef.current >= day3Balance.flashlightRepelSeconds) {
             flashlightRepelClockRef.current = 0;
             repelMonsterWithFlashlight(view);
             /*
@@ -3923,17 +3939,17 @@ function getDay3NaturalMoveOptions(position) {
           const next = { ...timers };
           ["left", "right"].forEach((side) => {
             if (monsters[side] >= 4) {
-              if (next[side] === null) next[side] = DAY3_BALANCE.attackWaitSeconds;
+              if (next[side] === null) next[side] = day3Balance.attackWaitSeconds;
               const pressured = isRepairing || view !== side;
               if (!ad && next[side] > 0) {
-                next[side] -= dt * (pressured ? DAY3_BALANCE.attackPressureMultiplier : 1);
+                next[side] -= dt * (pressured ? day3Balance.attackPressureMultiplier : 1);
               }
               if (!ad && next[side] <= 0) {
                 next[side] = 0;
                 attackRollClockRef.current[side] += dt;
-                if (attackRollClockRef.current[side] >= DAY3_BALANCE.attackRollSeconds) {
+                if (attackRollClockRef.current[side] >= day3Balance.attackRollSeconds) {
                   attackRollClockRef.current[side] = 0;
-                  if (Math.random() < DAY3_BALANCE.attackRollChance) triggerGameover("monster");
+                  if (Math.random() < day3Balance.attackRollChance) triggerGameover("monster");
                 }
               }
             } else {
@@ -3947,7 +3963,7 @@ function getDay3NaturalMoveOptions(position) {
 
       if (isRepairing && canRepair) {
         repairIdleRef.current = 0;
-        const speed = stageIndex === 7 ? DAY3_BALANCE.finalRepairPerSecond : DAY3_BALANCE.repairPerSecond;
+        const speed = stageIndex === 7 ? day3Balance.finalRepairPerSecond : repairPerSecond;
         setStageProgress((value) => {
           const next = clamp(value + speed * dt, 0, 100);
           if (phase === "tutorialRepair" && !adShownRef.current.has(0) && next >= 30) {
@@ -3959,9 +3975,9 @@ function getDay3NaturalMoveOptions(position) {
         });
       } else if ((phase === "tutorialRepair" || phase === "playing") && !ad) {
         repairIdleRef.current += dt;
-        const grace = stageIndex === 7 ? DAY3_BALANCE.finalRepairGrace : DAY3_BALANCE.repairGrace;
+        const grace = stageIndex === 7 ? day3Balance.finalRepairGrace : day3Balance.repairGrace;
         if (repairIdleRef.current > grace) {
-          const decay = stageIndex === 7 ? DAY3_BALANCE.finalDecayPerSecond : DAY3_BALANCE.decayPerSecond;
+          const decay = stageIndex === 7 ? day3Balance.finalDecayPerSecond : day3Balance.decayPerSecond;
           setStageProgress((value) => clamp(value - decay * dt, 0, 100));
         }
       }
@@ -4065,8 +4081,7 @@ function getDay3NaturalMoveOptions(position) {
             <strong>상태</strong>
             <span>정신오염도 {Math.round(contamination)} / 100</span>
             <span>{contaminationLabel}</span>
-            <span>손전등 안정도 {Math.round(flashlightStability)}%</span>
-            <span>DEV 괴물 위치: {monsterPositionLabel}</span>
+            {devVisible && <span>DEV 괴물 위치: {monsterPositionLabel}</span>}
             <span>좌측: {leftCue}</span>
             <span>우측: {rightCue}</span>
           </aside>
@@ -4168,25 +4183,180 @@ function getDay3NaturalMoveOptions(position) {
   );
 }
 
-function DaySelect({ unlockedDay, onSelect }) {
+function DaySelect({ unlockedDay, lastDay, onSelect }) {
+  const initialCustomDay = Math.min(Math.max(1, unlockedDay), IMPLEMENTED_DAYS);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customDay, setCustomDay] = useState(initialCustomDay);
+  const [customStep, setCustomStep] = useState("pick");
+  const [customSettings, setCustomSettings] = useState(DEFAULT_CUSTOM_SETTINGS);
+
+  const hasLastDay = Number.isFinite(lastDay) && lastDay >= 1 && lastDay <= IMPLEMENTED_DAYS;
+  const latestDay = Math.min(Math.max(1, unlockedDay), IMPLEMENTED_DAYS);
+  const customUnlocked = unlockedDay > IMPLEMENTED_DAYS;
+
+  const customDayTitles = {
+    1: "1?? ?? ??",
+    2: "2?? ?? ??",
+    3: "3?? ?? ??",
+  };
+
+  const day1Controls = [
+    { key: "day1RebootCheckInterval", label: "??? ?? ??(ms)", min: 1000, max: 60000, step: 500 },
+    { key: "day1ClearTimeSeconds", label: "????? ??? ?? ??(?)", min: 60, max: 1800, step: 10 },
+    { key: "day1ReportTimeBonusSeconds", label: "???? ?? ?? ? ??? ??(?)", min: 0, max: 180, step: 5 },
+    { key: "day1LingerAmbushDelay", label: "??? ?? ??? ??(ms)", min: 1000, max: 60000, step: 500 },
+  ];
+  const day2Controls = [
+    { key: "day2Sedatives", label: "??? ??", min: 0, max: 30, step: 1 },
+  ];
+  const day3Controls = [
+    { key: "repairPerSecond", label: "?? ?? ??(%/?)", min: 1, max: 40, step: 0.5 },
+    { key: "finalRepairPerSecond", label: "8?? ?? ??(%/?)", min: 1, max: 40, step: 0.5 },
+    { key: "repairGrace", label: "?? ?? ?? ??(?)", min: 0, max: 15, step: 0.5 },
+    { key: "finalRepairGrace", label: "8?? ?? ?? ?? ??(?)", min: 0, max: 15, step: 0.5 },
+    { key: "decayPerSecond", label: "??? ?? ??(%/?)", min: 0, max: 20, step: 0.5 },
+    { key: "finalDecayPerSecond", label: "8?? ??? ?? ??(%/?)", min: 0, max: 20, step: 0.5 },
+    { key: "repairContaminationChange", label: "?? ? ???? ???", min: -10, max: 10, step: 0.25 },
+    { key: "flashlightRepelSeconds", label: "??? ?? ?? ??(?)", min: 0.1, max: 5, step: 0.05 },
+    { key: "monsterStepSeconds", label: "?? ?? ?? ??(?)", min: 1, max: 20, step: 0.1 },
+    { key: "repairMonsterBonus", label: "?? ? ?? ?? ??(?)", min: 0, max: 10, step: 0.1 },
+    { key: "attackWaitSeconds", label: "?? ?? ?? ??(?)", min: 1, max: 60, step: 1 },
+    { key: "attackPressureMultiplier", label: "?? ?? ???? ??", min: 1, max: 5, step: 0.1 },
+    { key: "attackRollSeconds", label: "?? ?? ?? ??(?)", min: 0.2, max: 5, step: 0.1 },
+    { key: "attackRollChance", label: "?? ?? ??", min: 0, max: 1, step: 0.01 },
+    { key: "flashlightPanicDashChance", label: "??? ??? ?? ??", min: 0, max: 1, step: 0.01 },
+    { key: "viewTransitionMs", label: "?? ?? ? ?? ?? ??(ms)", min: 100, max: 5000, step: 50 },
+    { key: "adReturnChanceMin", label: "?? ?? ?? ??? ??", min: 0, max: 1, step: 0.01 },
+    { key: "adReturnChanceMax", label: "?? ?? ??? ??", min: 0, max: 1, step: 0.01 },
+    { key: "adReturnRampMs", label: "?? ?? ?? ??(ms)", min: 1000, max: 120000, step: 1000 },
+    { key: "maxAdCount", label: "?? ?? ?? ?? ??", min: 0, max: 20, step: 1 },
+  ];
+
+  function updateCustomSetting(key, value) {
+    setCustomSettings((settings) => ({ ...settings, [key]: Number(value) }));
+  }
+
+  function updateDay3Setting(key, value) {
+    const numericValue = Number(value);
+    setCustomSettings((settings) => ({
+      ...settings,
+      day3RepairPerSecond: key === "repairPerSecond" ? numericValue : settings.day3RepairPerSecond,
+      day3Balance: {
+        ...(settings.day3Balance ?? {}),
+        [key]: numericValue,
+      },
+    }));
+  }
+
+  function openCustomMenu() {
+    if (!customUnlocked) return;
+    setCustomOpen(true);
+    setCustomStep("pick");
+  }
+
+  function chooseCustomDay(day) {
+    setCustomDay(day);
+    setCustomStep("settings");
+  }
+
+  function getDay3Value(key) {
+    if (key === "repairPerSecond") return customSettings.day3RepairPerSecond ?? DAY3_BALANCE.repairPerSecond;
+    return customSettings.day3Balance?.[key] ?? DAY3_BALANCE[key];
+  }
+
   return (
-    <main className="day-select">
-      <section>
-        <span>ANALOG OBSERVATION</span>
-        <h1>근무 일차 선택</h1>
-        <div className="day-buttons">
-          {Array.from({ length: DAY_COUNT }, (_, index) => {
-            const day = index + 1;
-            const implemented = day <= IMPLEMENTED_DAYS;
-            const unlocked = implemented && day <= unlockedDay;
-            return (
-              <button key={day} type="button" disabled={!unlocked} onClick={() => onSelect(day)}>
-                <strong>{day}일차</strong>
-                <small>{!implemented ? "업데이트 예정" : unlocked ? "진입 가능" : "잠김"}</small>
-              </button>
-            );
-          })}
+    <main className="day-select main-menu">
+      <img className="main-menu-logo" src="/par-logo.png" alt="P.A.R Pioneer Asset Recovery" />
+      <img className="main-menu-red-logo" src="/적경국로고-.png" alt="Bureau of Red Zone Defense" />
+      <section className="main-menu-panel">
+        <span>PIONEER ASSET RECOVERY</span>
+        <h1>?? ??</h1>
+        <div className="main-menu-actions">
+          <button type="button" onClick={() => onSelect(1)}>
+            <strong>? ??</strong>
+            <small>1???? ??? ?? ?????</small>
+          </button>
+          <button type="button" disabled={!hasLastDay} onClick={() => hasLastDay && onSelect(lastDay)}>
+            <strong>????</strong>
+            <small>{hasLastDay ? String(lastDay) + "?? ??? ?? ??" : "??? ?? ??"}</small>
+          </button>
+          <button type="button" onClick={() => onSelect(latestDay)}>
+            <strong>?? ??</strong>
+            <small>{latestDay}?? ??</small>
+          </button>
+          <button type="button" disabled={!customUnlocked} onClick={openCustomMenu}>
+            <strong>??? ??</strong>
+            <small>{customUnlocked ? "??? ?? ? ??? ??? ?????" : "?? ?? ??? ? ???"}</small>
+          </button>
         </div>
+
+        {customOpen && customStep === "pick" && (
+          <div className="custom-menu custom-day-picker">
+            <div className="custom-menu-header">
+              <strong>??? ?? ??</strong>
+              <button type="button" onClick={() => setCustomOpen(false)}>??</button>
+            </div>
+            {[1, 2, 3].map((day) => (
+              <button key={day} type="button" className="custom-day-button" onClick={() => chooseCustomDay(day)}>
+                <strong>{day}??</strong>
+                <small>{customDayTitles[day]}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {customOpen && customStep === "settings" && (
+          <div className="custom-menu custom-settings-panel">
+            <div className="custom-menu-header">
+              <strong>{customDayTitles[customDay]}</strong>
+              <button type="button" onClick={() => setCustomStep("pick")}>??</button>
+            </div>
+            <div className="custom-controls">
+              {customDay === 1 && day1Controls.map((control) => (
+                <label key={control.key}>
+                  <span>{control.label}</span>
+                  <input
+                    type="number"
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    value={customSettings[control.key]}
+                    onChange={(event) => updateCustomSetting(control.key, event.target.value)}
+                  />
+                </label>
+              ))}
+              {customDay === 2 && day2Controls.map((control) => (
+                <label key={control.key}>
+                  <span>{control.label}</span>
+                  <input
+                    type="number"
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    value={customSettings[control.key]}
+                    onChange={(event) => updateCustomSetting(control.key, event.target.value)}
+                  />
+                </label>
+              ))}
+              {customDay === 3 && day3Controls.map((control) => (
+                <label key={control.key}>
+                  <span>{control.label}</span>
+                  <input
+                    type="number"
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    value={getDay3Value(control.key)}
+                    onChange={(event) => updateDay3Setting(control.key, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+            <button type="button" className="custom-start" onClick={() => onSelect(customDay, customSettings)}>
+              ???
+            </button>
+          </div>
+        )}
       </section>
     </main>
   );
@@ -4194,31 +4364,48 @@ function DaySelect({ unlockedDay, onSelect }) {
 
 function App() {
   const [selectedDay, setSelectedDay] = useState(null);
+  const [runSettings, setRunSettings] = useState(null);
+  const [lastDay, setLastDay] = useState(() => {
+    const saved = Number(localStorage.getItem(LAST_DAY_KEY));
+    return Number.isFinite(saved) && saved >= 1 && saved <= IMPLEMENTED_DAYS ? saved : null;
+  });
   const [unlockedDay, setUnlockedDay] = useState(() => {
     const saved = Number(localStorage.getItem(SAVE_KEY));
     return Math.max(DEFAULT_UNLOCKED_DAY, Number.isFinite(saved) ? saved : 1);
   });
 
+  function selectDay(day, customSettings = null) {
+    setSelectedDay(day);
+    setRunSettings(customSettings);
+    setLastDay(day);
+    localStorage.setItem(LAST_DAY_KEY, String(day));
+  }
+
+  function returnToMenu() {
+    setSelectedDay(null);
+    setRunSettings(null);
+  }
+
   function completeDay(day) {
-    const next = Math.min(IMPLEMENTED_DAYS, day + 1);
+    const next = Math.min(IMPLEMENTED_DAYS + 1, day + 1);
     const updated = Math.max(unlockedDay, next);
     setUnlockedDay(updated);
     localStorage.setItem(SAVE_KEY, String(updated));
   }
 
   if (selectedDay === 1) {
-    return <DayOneGame onReturnToMenu={() => setSelectedDay(null)} onCompleteDay={() => completeDay(1)} />;
+    return <DayOneGame onReturnToMenu={returnToMenu} onCompleteDay={() => completeDay(1)} customSettings={runSettings} />;
   }
 
   if (selectedDay === 2) {
-    return <DayTwoGame onReturnToMenu={() => setSelectedDay(null)} onCompleteDay={() => completeDay(2)} />;
+    return <DayTwoGame onReturnToMenu={returnToMenu} onCompleteDay={() => completeDay(2)} customSettings={runSettings} />;
   }
 
   if (selectedDay === 3) {
-    return <DayThreeGame onReturnToMenu={() => setSelectedDay(null)} onCompleteDay={() => completeDay(3)} />;
+    return <DayThreeGame onReturnToMenu={returnToMenu} onCompleteDay={() => completeDay(3)} customSettings={runSettings} />;
   }
 
-  return <DaySelect unlockedDay={unlockedDay} onSelect={setSelectedDay} />;
+  return <DaySelect unlockedDay={unlockedDay} lastDay={lastDay} onSelect={selectDay} />;
 }
 
 createRoot(document.getElementById("root")).render(<App />);
