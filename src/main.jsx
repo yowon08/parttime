@@ -450,6 +450,11 @@ function ElevatorReturn({ line, fading = false, menuFading = false, image = ELEV
 function DayClearBridge({ day, lines, onDone }) {
   const [lineIndex, setLineIndex] = useState(0);
   const [phase, setPhase] = useState("scene");
+  const onDoneRef = useRef(onDone);
+
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   useEffect(() => {
     if (day !== 3) return undefined;
@@ -495,7 +500,7 @@ function DayClearBridge({ day, lines, onDone }) {
       clearInterval(fadeTimer);
       audioA.pause();
       audioB.pause();
-      onDone();
+      onDoneRef.current?.();
     }, DAY_CLEAR_TITLE_DURATION);
 
     return () => {
@@ -504,7 +509,7 @@ function DayClearBridge({ day, lines, onDone }) {
       audioA.pause();
       audioB.pause();
     };
-  }, [onDone, phase]);
+  }, [phase]);
 
   const currentLine = phase === "scene" ? lines[lineIndex] ?? "" : "";
 
