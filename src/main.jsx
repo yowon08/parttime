@@ -3195,7 +3195,7 @@ const DAY3_BALANCE = {
   attackRollSeconds: 1, // 3일차 공격 대기 시간이 끝난 뒤 공격 확률을 굴리는 주기(초)
   attackRollChance: 0.2, // 3일차 공격 판정 주기마다 실제 게임오버가 날 확률
   flashlightPanicDashChance: 0.4, // 3일차 손전등을 맞은 괴물이 반대편 근접 위치로 뛰는 확률
-  viewTransitionMs: 1150, // 3일차 좌/우에서 중앙으로 돌아온 뒤 광고 판정을 굴리기까지의 시간(ms)
+  viewTransitionMs: 1150, // 3일차 시선 전환 연출 시간(ms). 중앙 복귀 전환이 끝나는 순간 대기 광고를 표시하는 fallback 기준
   adReturnChanceMin: 0.02, // 3일차 광고가 막 나온 직후의 최소 광고 재등장 확률
   adReturnChanceMax: 0.3, // 3일차 시간이 지난 뒤 도달하는 최대 광고 재등장 확률
   adReturnRampMs: 30000, // 3일차 광고 재등장 확률이 최소에서 최대로 올라가는 시간(ms)
@@ -3295,6 +3295,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   const [adCanSkip, setAdCanSkip] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
   const [day3DeveloperVisible, setDay3DeveloperVisible] = useState(false);
+  const [adDebugTick, setAdDebugTick] = useState(0);
   const [message, setMessage] = useState("안내를 확인하십시오.");
   const [gameover, setGameover] = useState(null);
   const [endingStarted, setEndingStarted] = useState(false);
@@ -3323,6 +3324,9 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   const monsterMovingRef = useRef(false);
   const attackRollClockRef = useRef({ left: 0, right: 0 });
   const returnAdTimerRef = useRef(null);
+  const panoramaLayerRef = useRef(null);
+  const queuedReturnAdRef = useRef(null);
+  const [queuedReturnAdDebug, setQueuedReturnAdDebug] = useState(null);
   const endingTimerRef = useRef(null);
   const lastAdAtRef = useRef(Date.now());
 
@@ -3342,6 +3346,8 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
     attackRollClockRef.current = { left: 0, right: 0 };
     clearTimeout(returnAdTimerRef.current);
     returnAdTimerRef.current = null;
+    queuedReturnAdRef.current = null;
+    setQueuedReturnAdDebug(null);
     clearTimeout(endingTimerRef.current);
     endingTimerRef.current = null;
     lastAdAtRef.current = Date.now();
@@ -3415,9 +3421,50 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   const day3AdChanceMax = customSettings?.day3AdChanceMax ?? DAY3_BALANCE.adReturnChanceMax;
   const day3AdReturnRampMs = Math.max(1, customSettings?.day3AdReturnRampMs ?? DAY3_BALANCE.adReturnRampMs);
 
+  function getCurrentDay3AdChance() {
+    const ramp = clamp((Date.now() - lastAdAtRef.current) / day3AdReturnRampMs, 0, 1);
+    const minChance = Math.min(day3AdChanceMin, day3AdChanceMax);
+    const maxChance = Math.max(day3AdChanceMin, day3AdChanceMax);
+    return minChance + (maxChance - minChance) * ramp;
+  }
+
+  function getDay3AdDebugInfo() {
+    const totalImages = DAY3_AD_IMAGES.length;
+    const shownCount = adShownRef.current.size;
+    const unusedCount = Math.max(0, totalImages - shownCount);
+    const remainingByLimit = Math.max(0, day3AdMaxCount - adCountRef.current);
+    const queuedAd = queuedReturnAdRef.current;
+
+    return {
+      totalImages,
+      shownCount,
+      unusedCount,
+      usedCount: adCountRef.current,
+      maxCount: day3AdMaxCount,
+      remainingByLimit,
+      currentChance: getCurrentDay3AdChance(),
+      queuedAdIndex: queuedAd?.index ?? null,
+      queuedAdSide: queuedAd?.sideView ?? null,
+      queuedAdChance: queuedAd?.chance ?? queuedReturnAdDebug?.chance ?? null,
+      queuedAdRoll: queuedAd?.roll ?? queuedReturnAdDebug?.roll ?? null,
+      queuedAdStatus: queuedAd
+        ? "중앙 복귀 대기"
+        : queuedReturnAdDebug?.status ?? "없음",
+    };
+  }
+
+  const adDebugInfo = getDay3AdDebugInfo();
+  void adDebugTick;
+
   useEffect(() => {
     return () => clearTimeout(returnAdTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!day3DeveloperVisible) return undefined;
+    const timer = setInterval(() => setAdDebugTick((tick) => tick + 1), 500);
+    return () => clearInterval(timer);
+  }, [day3DeveloperVisible]);
 
   useEffect(() => {
     return () => clearTimeout(endingTimerRef.current);
@@ -3834,39 +3881,126 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
     setTimeout(() => setEndingComplete(true), 900);
   }
 
-  function tryRandomReturnAd(previousView, nextView) {
-    if (phase !== "playing" || previousView === "center" || nextView !== "center" || ad || gameover) return;
-    if (adCountRef.current >= day3AdMaxCount) return;
-    const adPool = DAY3_AD_IMAGES
-  .map((_, index) => index)
-  .filter((index) => index !== 0 || DAY3_AD_IMAGES.length === 1);
+  function getDay3AdCandidates() {
+    if (!DAY3_AD_IMAGES.length) return [];
+
+    const adPool = DAY3_AD_IMAGES.map((_, index) => index);
     let candidates = adPool.filter((index) => !adShownRef.current.has(index));
-    if (!candidates.length && adPool.length) {
+
+    if (!candidates.length) {
       adShownRef.current = new Set();
       candidates = adPool;
     }
-    if (!candidates.length) return;
 
-    const ramp = clamp((Date.now() - lastAdAtRef.current) / day3AdReturnRampMs, 0, 1);
-    const minChance = Math.min(day3AdChanceMin, day3AdChanceMax);
-    const maxChance = Math.max(day3AdChanceMin, day3AdChanceMax);
-    const adChance = minChance + (maxChance - minChance) * ramp;
-    if (Math.random() < adChance) {
-      startAd(randomItem(candidates), "playing");
+    return candidates;
+  }
+
+  function rollReturnAdWhileSide(sideView) {
+    if (sideView === "center") return;
+    if (phase !== "playing" || ad || gameover) return;
+    if (queuedReturnAdRef.current) return;
+
+    const adChance = getCurrentDay3AdChance();
+
+    if (adCountRef.current >= day3AdMaxCount) {
+      setQueuedReturnAdDebug({ status: "횟수 한도", sideView, chance: adChance, roll: null });
+      return;
     }
+
+    const candidates = getDay3AdCandidates();
+    if (!candidates.length) {
+      setQueuedReturnAdDebug({ status: "이미지 없음", sideView, chance: adChance, roll: null });
+      return;
+    }
+
+    const roll = Math.random();
+    if (roll < adChance) {
+      const index = randomItem(candidates);
+      queuedReturnAdRef.current = {
+        index,
+        sideView,
+        chance: adChance,
+        roll,
+        rolledAt: Date.now(),
+      };
+      setQueuedReturnAdDebug({ status: "중앙 복귀 대기", index, sideView, chance: adChance, roll });
+      return;
+    }
+
+    setQueuedReturnAdDebug({ status: "판정 실패", sideView, chance: adChance, roll });
+  }
+
+  function showQueuedReturnAd(nextPhase = "playing") {
+    const queuedAd = queuedReturnAdRef.current;
+    queuedReturnAdRef.current = null;
+
+    if (!queuedAd) return false;
+
+    if (phase !== "playing" || ad || gameover || adCountRef.current >= day3AdMaxCount) {
+      setQueuedReturnAdDebug({ ...queuedAd, status: "표시 취소" });
+      return false;
+    }
+
+    setQueuedReturnAdDebug({ ...queuedAd, status: "표시됨" });
+    return startAd(queuedAd.index, nextPhase);
+  }
+
+  function showQueuedReturnAdAfterCenterSettled() {
+    clearTimeout(returnAdTimerRef.current);
+    returnAdTimerRef.current = null;
+
+    const layer = panoramaLayerRef.current;
+
+    if (!layer) {
+      requestAnimationFrame(() => showQueuedReturnAd("playing"));
+      return;
+    }
+
+    let done = false;
+
+    const cleanupAndShow = () => {
+      if (done) return;
+      done = true;
+      layer.removeEventListener("transitionend", handleTransitionEnd, true);
+      clearTimeout(returnAdTimerRef.current);
+      returnAdTimerRef.current = null;
+      showQueuedReturnAd("playing");
+    };
+
+    const handleTransitionEnd = (event) => {
+      if (event.target !== layer && !layer.contains(event.target)) return;
+      cleanupAndShow();
+    };
+
+    layer.addEventListener("transitionend", handleTransitionEnd, true);
+
+    // CSS transitionend가 브라우저/스타일 변경으로 누락되어도 너무 늦지 않게 보정한다.
+    returnAdTimerRef.current = setTimeout(cleanupAndShow, DAY3_BALANCE.viewTransitionMs + 40);
   }
 
   function moveView(nextView) {
-    if (controlsLocked) return;
+    if (controlsLocked || nextView === view) return;
+
     const previousView = view;
-    if (nextView !== "center") setIsRepairing(false);
+
+    if (nextView !== "center") {
+      setIsRepairing(false);
+    }
+
     setView(nextView);
+
     clearTimeout(returnAdTimerRef.current);
-    if (previousView !== "center" && nextView === "center") {
-      returnAdTimerRef.current = setTimeout(() => {
-        tryRandomReturnAd(previousView, nextView);
-        returnAdTimerRef.current = null;
-      }, DAY3_BALANCE.viewTransitionMs);
+    returnAdTimerRef.current = null;
+
+    if (nextView !== "center") {
+      rollReturnAdWhileSide(nextView);
+      return;
+    }
+
+    if (previousView !== "center") {
+      // 좌/우에서 미리 당첨된 광고는 중앙 복귀 애니메이션이 끝나는 즉시 표시한다.
+      // transitionend를 우선 사용하므로, 화면이 다 돌아간 뒤 한 박자 늦지 않게 붙는다.
+      showQueuedReturnAdAfterCenterSettled();
     }
   }
 
@@ -4430,7 +4564,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
   ]);
 
   const activeScriptText = scriptLines[scriptIndex] ?? message;
-  const adText = ad ? DAY3_TEXT.ads[ad.index]?.[ad.line] : null;
+  const adText = null;
   const contaminationLabel = contamination < 25 ? "안정" : contamination < 50 ? "불안정" : contamination < 75 ? "침식 진행" : "붕괴 임박";
   const leftCue = monsters.left === 0 ? "정적" : monsters.left < 3 ? "젖은 발소리" : "질척임 근접";
   const rightCue = monsters.right === 0 ? "정적" : monsters.right < 3 ? "금속 긁힘" : "철판 울림 근접";
@@ -4463,7 +4597,7 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
       onPointerLeave={handleScenePointerUp}
     >
       {phase !== "introElevator" && (
-        <div className={`day3-panorama-layer view-${view}`}>
+        <div ref={panoramaLayerRef} className={`day3-panorama-layer view-${view}`}>
           <img className={`day3-panorama view-${view}`} src={DAY3_ASSETS.mainImage} alt="" />
           <div className="day3-industrial-fallback" />
           <section className={`day3-panel${view !== "center" ? " is-hidden" : ""}`}>
@@ -4529,6 +4663,15 @@ function DayThreeGame({ onReturnToMenu, onCompleteDay, customSettings = null }) 
               <span>DEV 괴물 위치: {monsterPositionLabel}</span>
               <span>좌측: {leftCue}</span>
               <span>우측: {rightCue}</span>
+              <span>광고 이미지: {adDebugInfo.totalImages}개</span>
+              <span>이번 사이클 남은 광고: {adDebugInfo.unusedCount}개</span>
+              <span>광고 출력: {adDebugInfo.usedCount} / {adDebugInfo.maxCount}</span>
+              <span>출력 가능 잔여: {adDebugInfo.remainingByLimit}회</span>
+              <span>현재 광고 확률: {(adDebugInfo.currentChance * 100).toFixed(1)}%</span>
+              <span>옆보기 판정 상태: {adDebugInfo.queuedAdStatus}</span>
+              <span>대기 광고: {adDebugInfo.queuedAdIndex === null ? "없음" : `${adDebugInfo.queuedAdIndex + 1}번 / ${adDebugInfo.queuedAdSide}`}</span>
+              <span>최근 판정값: {adDebugInfo.queuedAdRoll === null ? "없음" : `${(adDebugInfo.queuedAdRoll * 100).toFixed(1)}% / 기준 ${(adDebugInfo.queuedAdChance * 100).toFixed(1)}%`}</span>
+              <span>광고 상태: {ad ? "송출 중" : phase === "playing" ? "대기" : "비활성"}</span>
             </aside>
           )}
 
